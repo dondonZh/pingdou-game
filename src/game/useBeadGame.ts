@@ -352,6 +352,11 @@ export const useBeadGame = () => {
     }
 
     if (cell.beadColor !== null) {
+      if (activeBoardColor.value === cell.beadColor && !selectedTrayColor.value) {
+        clearSelection('empty')
+        return
+      }
+
       activateBoardColor(cell.beadColor)
       return
     }
@@ -612,7 +617,7 @@ export const useBeadGame = () => {
     }
 
     const keepSelection = target.closest(
-      '.board-cell, .tray-slot, .collect-button, .tool-button, .soft-button, .level-chip'
+      '.board-cell, .tray-panel, .tray-slot, .collect-button, .tool-button, .soft-button, .level-chip'
     )
 
     if (!keepSelection) {

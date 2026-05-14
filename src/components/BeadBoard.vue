@@ -13,6 +13,19 @@ const emit = defineEmits<{
   (event: 'cell-click', row: number, col: number): void
   (event: 'clear-selection'): void
 }>()
+
+const handleDragStart = (event: DragEvent, cell: BoardCell | null) => {
+  if (!cell?.beadColor) {
+    event.preventDefault()
+    return
+  }
+
+  event.dataTransfer?.setData('application/x-pingdou-active-color', cell.beadColor)
+  event.dataTransfer?.setData('text/plain', cell.beadColor)
+  if (event.dataTransfer) {
+    event.dataTransfer.effectAllowed = 'move'
+  }
+}
 </script>
 
 <template>
@@ -40,13 +53,16 @@ const emit = defineEmits<{
               {
                 'has-bead': !!cell.beadColor,
                 'is-active': !!cell.beadColor && activeBoardColor === cell.beadColor,
+                'is-draggable': !!cell.beadColor && activeBoardColor === cell.beadColor,
                 'is-drop-target': !cell.beadColor && !!selectedTrayColor,
                 'is-correct': !!cell.beadColor && cell.beadColor === cell.baseColor,
                 'is-misplaced': !!cell.beadColor && cell.beadColor !== cell.baseColor
               }
             ]"
             type="button"
+            :draggable="!!cell.beadColor && activeBoardColor === cell.beadColor"
             @click="emit('cell-click', rowIndex, cellIndex)"
+            @dragstart="handleDragStart($event, cell)"
           >
             <span
               v-if="cell.beadColor"

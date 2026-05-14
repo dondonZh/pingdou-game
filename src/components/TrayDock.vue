@@ -1,7 +1,8 @@
 <script setup lang="ts">
+import { ref } from 'vue'
 import type { ColorMeta, ColorId, ToolState } from '../game/types'
 
-defineProps<{
+const props = defineProps<{
   capacity: number
   trayTotal: number
   traySlots: Array<{ index: number; color: ColorId | null }>
@@ -18,10 +19,70 @@ const emit = defineEmits<{
   (event: 'tool-brush'): void
   (event: 'tool-hourglass'): void
 }>()
+
+const isDragCollectHover = ref(false)
+
+const handleSlotClick = (slotIndex: number) => {
+  if (props.activeBoardColor) {
+    emit('collect')
+    return
+  }
+
+  emit('select-color', slotIndex)
+}
+
+const isCollectDrag = (event: DragEvent) =>
+  Array.from(event.dataTransfer?.types ?? []).includes('application/x-pingdou-active-color')
+
+const handleTrayDragOver = (event: DragEvent) => {
+  if (!isCollectDrag(event)) {
+    return
+  }
+
+  event.preventDefault()
+  isDragCollectHover.value = true
+
+  if (event.dataTransfer) {
+    event.dataTransfer.dropEffect = 'move'
+  }
+}
+
+const handleTrayDragLeave = (event: DragEvent) => {
+  const nextTarget = event.relatedTarget
+  if (nextTarget instanceof Node && event.currentTarget instanceof Node && event.currentTarget.contains(nextTarget)) {
+    return
+  }
+
+  isDragCollectHover.value = false
+}
+
+const handleTrayDrop = (event: DragEvent) => {
+  if (!isCollectDrag(event)) {
+    return
+  }
+
+  event.preventDefault()
+  isDragCollectHover.value = false
+  emit('collect')
+}
+
+const resetDragHover = () => {
+  isDragCollectHover.value = false
+}
 </script>
 
 <template>
-  <section class="tray-panel">
+  <section
+    class="tray-panel"
+    :class="{
+      'is-collect-ready': !!activeBoardColor,
+      'is-collect-hover': isDragCollectHover
+    }"
+    @dragover="handleTrayDragOver"
+    @dragleave="handleTrayDragLeave"
+    @drop="handleTrayDrop"
+    @dragend="resetDragHover"
+  >
     <div class="tray-topline">
       <div class="tray-capacity">
         <span>收纳槽</span>
@@ -44,7 +105,7 @@ const emit = defineEmits<{
           { 'is-empty': !slot.color, 'is-selected': !!slot.color && selectedTrayColor === slot.color }
         ]"
         type="button"
-        @click="emit('select-color', slot.index)"
+        @click="handleSlotClick(slot.index)"
       >
         <span v-if="slot.color" class="tray-slot__bead" :class="`bead--${slot.color}`">
           <span class="bead__shine"></span>
