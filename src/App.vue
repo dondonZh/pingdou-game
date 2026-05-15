@@ -29,6 +29,8 @@ const isSupportModalOpen = ref(false)
 const isResultModalOpen = ref(false)
 const shareCopyStatus = ref('')
 
+let autoAdvanceTimer: number | null = null
+
 const targetStats = computed(() => game.colorStats.value.filter((entry) => entry.targets > 0))
 const boardAccent = computed(() => {
   const active = game.activeVisualColor.value
@@ -54,6 +56,13 @@ const closeSupportModal = () => {
 const closeResultModal = () => {
   isResultModalOpen.value = false
   shareCopyStatus.value = ''
+}
+
+const clearAutoAdvanceTimer = () => {
+  if (autoAdvanceTimer !== null) {
+    window.clearTimeout(autoAdvanceTimer)
+    autoAdvanceTimer = null
+  }
 }
 
 const goNextFromResult = () => {
@@ -279,11 +288,29 @@ watch(
   { flush: 'post' }
 )
 
+watch(
+  [status, clearSummary, levelIndex],
+  ([nextStatus, summary, currentIndex]) => {
+    clearAutoAdvanceTimer()
+
+    if (nextStatus !== 'won' || summary || currentIndex >= game.levels.length - 1) {
+      return
+    }
+
+    autoAdvanceTimer = window.setTimeout(() => {
+      autoAdvanceTimer = null
+      game.goToNextLevel()
+    }, 680)
+  },
+  { flush: 'post' }
+)
+
 onMounted(() => {
   window.addEventListener('keydown', handleWindowKeydown)
 })
 
 onBeforeUnmount(() => {
+  clearAutoAdvanceTimer()
   window.removeEventListener('keydown', handleWindowKeydown)
 })
 </script>
@@ -394,7 +421,7 @@ onBeforeUnmount(() => {
               <span class="info-card__icon info-card__icon--warm">★</span>
               <strong>留言板</strong>
             </div>
-            <p>hello 大家，欢迎来试玩这版拼豆工作台。</p>
+            <p>hello 大家，欢迎来试玩这版拼豆小游戏。</p>
             <p>现在已经把随机散豆、激活、收纳和批量补位串起来了，后面还会继续补更多主题关卡和细节动画。</p>
           </section>
 
@@ -444,7 +471,7 @@ onBeforeUnmount(() => {
         </div>
 
         <div class="support-modal__body">
-          <p>开源项目是把作者和用户紧紧联系在一起的纽带，如果您希望这个项目继续发展，可以请作者喝一杯奶茶。</p>
+          <p>如果您希望这个项目继续发展，可以请作者喝一杯奶茶。</p>
           <p>您的支持是作者把项目继续下去的动力。</p>
         </div>
 
