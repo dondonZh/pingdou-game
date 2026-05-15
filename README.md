@@ -1,16 +1,8 @@
-# 拼豆大闯关
+# 拼豆冒险屋
 
-一个基于 `Vue 3 + TypeScript + Vite` 的拼豆闯关网页原型。
+一个基于 `Vue 3 + TypeScript + Vite` 的拼豆闯关网页游戏。
 
-## 当前内容
-
-- 3 个初版关卡
-- 同色豆源激活与底部收纳槽
-- 同色底格填充与过关判定
-- 计时、重置、下一关与轻量道具
-- 拼豆感 UI：淡紫背景、圆角珠粒、软糖按钮、关卡 HUD
-
-## 本地启动
+## 本地开发
 
 ```bash
 npm install
@@ -21,4 +13,24 @@ npm run dev
 
 ```bash
 npm run build
+```
+
+## Docker 镜像
+
+构建镜像：
+
+```bash
+docker build -t pingdou-game:latest .
+```
+
+运行容器：
+
+```bash
+docker run -d --name pingdou-game -p 8080:80 pingdou-game:latest
+```
+
+访问地址：
+
+```text
+http://<你的服务器IP>:8080
 ```
