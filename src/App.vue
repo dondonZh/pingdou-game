@@ -1,9 +1,67 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import supportQrCode from './assets/support-qr-code.png'
 import BeadBoard from './components/BeadBoard.vue'
 import TrayDock from './components/TrayDock.vue'
 import { useBeadGame } from './game/useBeadGame'
+import type { ColorId } from './game/types'
+
+const TUTORIAL_STORAGE_KEY = 'pingdou-game-guided-tutorial-v2'
+
+type TutorialStepId = 'activate' | 'collect' | 'tray' | 'place'
+
+interface TutorialPlan {
+  color: ColorId
+  source: {
+    row: number
+    col: number
+  }
+  trayIndex: number
+  target: {
+    row: number
+    col: number
+  }
+}
+
+interface FocusRect {
+  top: number
+  left: number
+  width: number
+  height: number
+  radius: number
+}
+
+const tutorialSteps: Array<{
+  id: TutorialStepId
+  badge: string
+  title: string
+  body: string
+}> = [
+  {
+    id: 'activate',
+    badge: '步骤 1',
+    title: '先点亮一颗豆子',
+    body: '点一下高亮出来的这颗豆子，先感受“同色整组激活”的第一步。'
+  },
+  {
+    id: 'collect',
+    badge: '步骤 2',
+    title: '把激活豆子收进收纳槽',
+    body: '现在点击底部这个按钮，激活的豆子会一颗一颗落进收纳槽。'
+  },
+  {
+    id: 'tray',
+    badge: '步骤 3',
+    title: '从收纳槽里拿一种颜色',
+    body: '点一下高亮的槽位，选中刚刚收进去的颜色。'
+  },
+  {
+    id: 'place',
+    badge: '步骤 4',
+    title: '把豆子放回棋盘',
+    body: '最后点一下这个空出来的格子，看看它怎样自动补回去。'
+  }
+]
 
 const game = useBeadGame()
 const currentLevel = game.currentLevel
@@ -28,8 +86,15 @@ const leavingTrayIndexes = game.leavingTrayIndexes
 const isSupportModalOpen = ref(false)
 const isResultModalOpen = ref(false)
 const shareCopyStatus = ref('')
+const isTutorialOpen = ref(false)
+const tutorialStepIndex = ref(0)
+const tutorialPlan = ref<TutorialPlan | null>(null)
+const tutorialFocusRect = ref<FocusRect | null>(null)
 
 let autoAdvanceTimer: number | null = null
+let tutorialLayoutFrame: number | null = null
+
+const currentTutorialStep = computed(() => tutorialSteps[tutorialStepIndex.value] ?? tutorialSteps[0])
 
 const targetStats = computed(() => game.colorStats.value.filter((entry) => entry.targets > 0))
 const boardAccent = computed(() => {
@@ -65,10 +130,249 @@ const clearAutoAdvanceTimer = () => {
   }
 }
 
-const goNextFromResult = () => {
-  closeResultModal()
-  game.goToNextLevel()
+const cancelTutorialLayout = () => {
+  if (tutorialLayoutFrame !== null) {
+    window.cancelAnimationFrame(tutorialLayoutFrame)
+    tutorialLayoutFrame = null
+  }
 }
+
+const restartFromResult = () => {
+  closeResultModal()
+  game.restartRun()
+}
+
+const finishTutorial = () => {
+  isTutorialOpen.value = false
+  tutorialStepIndex.value = 0
+  tutorialPlan.value = null
+  tutorialFocusRect.value = null
+  window.localStorage.setItem(TUTORIAL_STORAGE_KEY, '1')
+}
+
+const getTutorialTargetId = (): string | null => {
+  const plan = tutorialPlan.value
+  if (!plan) {
+    return null
+  }
+
+  switch (currentTutorialStep.value.id) {
+    case 'activate':
+      return `board-cell-${plan.source.row}-${plan.source.col}`
+    case 'collect':
+      return 'collect-button'
+    case 'tray':
+      return `tray-slot-${plan.trayIndex}`
+    case 'place':
+      return `board-cell-${plan.target.row}-${plan.target.col}`
+    default:
+      return null
+  }
+}
+
+const updateTutorialLayout = async () => {
+  if (!isTutorialOpen.value) {
+    tutorialFocusRect.value = null
+    return
+  }
+
+  await nextTick()
+  const targetId = getTutorialTargetId()
+  if (!targetId) {
+    tutorialFocusRect.value = null
+    return
+  }
+
+  const element = document.querySelector<HTMLElement>(`[data-tutorial-id="${targetId}"]`)
+  if (!element) {
+    tutorialFocusRect.value = null
+    return
+  }
+
+  const rect = element.getBoundingClientRect()
+  const radius = targetId.startsWith('board-cell') || targetId.startsWith('tray-slot') ? 18 : 22
+  const padding = targetId.startsWith('board-cell') || targetId.startsWith('tray-slot') ? 8 : 10
+
+  tutorialFocusRect.value = {
+    top: rect.top - padding,
+    left: rect.left - padding,
+    width: rect.width + padding * 2,
+    height: rect.height + padding * 2,
+    radius
+  }
+}
+
+const scheduleTutorialLayout = () => {
+  if (!isTutorialOpen.value) {
+    return
+  }
+
+  cancelTutorialLayout()
+  tutorialLayoutFrame = window.requestAnimationFrame(() => {
+    tutorialLayoutFrame = null
+    void updateTutorialLayout()
+  })
+}
+
+const buildTutorialPlan = (): TutorialPlan | null => {
+  for (let rowIndex = 0; rowIndex < board.value.length; rowIndex += 1) {
+    const row = board.value[rowIndex]
+
+    for (let colIndex = 0; colIndex < row.length; colIndex += 1) {
+      const cell = row[colIndex]
+      if (!cell?.beadColor) {
+        continue
+      }
+
+      if (cell.beadColor !== cell.baseColor) {
+        continue
+      }
+
+      return {
+        color: cell.beadColor,
+        source: {
+          row: rowIndex,
+          col: colIndex
+        },
+        trayIndex: 0,
+        target: {
+          row: rowIndex,
+          col: colIndex
+        }
+      }
+    }
+  }
+
+  return null
+}
+
+const startGuidedTutorial = async () => {
+  game.restartRun()
+  await nextTick()
+
+  tutorialPlan.value = buildTutorialPlan()
+  if (!tutorialPlan.value) {
+    window.localStorage.setItem(TUTORIAL_STORAGE_KEY, '1')
+    return
+  }
+
+  tutorialStepIndex.value = 0
+  isTutorialOpen.value = true
+  scheduleTutorialLayout()
+}
+
+const handleBoardCellClick = async (row: number, col: number) => {
+  if (!isTutorialOpen.value) {
+    await game.placeBead(row, col)
+    return
+  }
+
+  const plan = tutorialPlan.value
+  if (!plan) {
+    return
+  }
+
+  if (currentTutorialStep.value.id === 'activate') {
+    if (row !== plan.source.row || col !== plan.source.col) {
+      return
+    }
+
+    await game.placeBead(row, col)
+    tutorialStepIndex.value = 1
+    scheduleTutorialLayout()
+    return
+  }
+
+  if (currentTutorialStep.value.id === 'place') {
+    if (row !== plan.target.row || col !== plan.target.col) {
+      return
+    }
+
+    await game.placeBead(row, col)
+    window.setTimeout(() => {
+      finishTutorial()
+    }, 320)
+  }
+}
+
+const handleCollect = async () => {
+  if (!isTutorialOpen.value) {
+    await game.collectActiveColor()
+    return
+  }
+
+  if (currentTutorialStep.value.id !== 'collect' || !tutorialPlan.value) {
+    return
+  }
+
+  await game.collectActiveColor()
+
+  const trayIndex = traySlots.value.find((slot) => slot.color === tutorialPlan.value?.color)?.index ?? 0
+  tutorialPlan.value = {
+    ...tutorialPlan.value,
+    trayIndex
+  }
+  tutorialStepIndex.value = 2
+  scheduleTutorialLayout()
+}
+
+const handleTraySelect = (slotIndex: number) => {
+  if (!isTutorialOpen.value) {
+    game.selectTrayColor(slotIndex)
+    return
+  }
+
+  if (currentTutorialStep.value.id !== 'tray' || !tutorialPlan.value || slotIndex !== tutorialPlan.value.trayIndex) {
+    return
+  }
+
+  game.selectTrayColor(slotIndex)
+  tutorialStepIndex.value = 3
+  scheduleTutorialLayout()
+}
+
+const handleClearSelection = () => {
+  if (isTutorialOpen.value) {
+    return
+  }
+
+  game.clearSelection('empty')
+}
+
+const tutorialFocusStyle = computed(() => {
+  const rect = tutorialFocusRect.value
+  if (!rect) {
+    return {}
+  }
+
+  return {
+    top: `${rect.top}px`,
+    left: `${rect.left}px`,
+    width: `${rect.width}px`,
+    height: `${rect.height}px`,
+    borderRadius: `${rect.radius}px`
+  }
+})
+
+const tutorialBubbleStyle = computed(() => {
+  const rect = tutorialFocusRect.value
+  if (!rect) {
+    return {}
+  }
+
+  const width = 320
+  const preferRight = rect.left + rect.width + width + 48 < window.innerWidth
+  const left = preferRight ? rect.left + rect.width + 22 : Math.max(24, rect.left - width - 22)
+  const top = Math.min(
+    Math.max(24, rect.top + rect.height / 2 - 96),
+    window.innerHeight - 250
+  )
+
+  return {
+    top: `${top}px`,
+    left: `${left}px`
+  }
+})
 
 const handleWindowKeydown = (event: KeyboardEvent) => {
   if (event.key !== 'Escape') {
@@ -82,6 +386,11 @@ const handleWindowKeydown = (event: KeyboardEvent) => {
 
   if (isResultModalOpen.value) {
     closeResultModal()
+    return
+  }
+
+  if (isTutorialOpen.value) {
+    finishTutorial()
   }
 }
 
@@ -179,7 +488,7 @@ const renderShareCanvas = () => {
 
   context.fillStyle = '#7f6fb6'
   context.font = '700 88px Microsoft YaHei'
-  context.fillText('拼豆大闯关', 106, 238)
+  context.fillText('拼豆冒险屋', 106, 238)
 
   context.fillStyle = '#8d82b4'
   context.font = '30px Microsoft YaHei'
@@ -231,7 +540,7 @@ const renderShareCanvas = () => {
 
   context.fillStyle = '#8d82b4'
   context.font = '26px Microsoft YaHei'
-  context.fillText('秘籍 perlerwin 可直接通关当前关卡', 138, 1128)
+  context.fillText('秘籍 ssxxbaba 可直接通关当前关卡', 138, 1128)
 
   context.fillStyle = '#c5b39f'
   context.font = '24px Microsoft YaHei'
@@ -269,7 +578,7 @@ const copyResultShare = async () => {
 
   try {
     await navigator.clipboard.writeText(
-      `我在拼豆大闯关全部通关，总用时 ${formatElapsed(clearSummary.value.elapsedSeconds)}，获得称号：${clearSummary.value.title}。`
+      `我在拼豆冒险屋全部通关，总用时 ${formatElapsed(clearSummary.value.elapsedSeconds)}，获得称号：${clearSummary.value.title}。`
     )
     shareCopyStatus.value = '已复制分享文案'
   } catch {
@@ -293,7 +602,7 @@ watch(
   ([nextStatus, summary, currentIndex]) => {
     clearAutoAdvanceTimer()
 
-    if (nextStatus !== 'won' || summary || currentIndex >= game.levels.length - 1) {
+    if (nextStatus !== 'won' || summary || currentIndex >= game.levels.length - 1 || isTutorialOpen.value) {
       return
     }
 
@@ -305,13 +614,28 @@ watch(
   { flush: 'post' }
 )
 
+watch(
+  [isTutorialOpen, tutorialStepIndex, board, traySlots],
+  () => {
+    scheduleTutorialLayout()
+  },
+  { flush: 'post', deep: true }
+)
+
 onMounted(() => {
   window.addEventListener('keydown', handleWindowKeydown)
+  window.addEventListener('resize', scheduleTutorialLayout)
+
+  if (!window.localStorage.getItem(TUTORIAL_STORAGE_KEY)) {
+    void startGuidedTutorial()
+  }
 })
 
 onBeforeUnmount(() => {
   clearAutoAdvanceTimer()
+  cancelTutorialLayout()
   window.removeEventListener('keydown', handleWindowKeydown)
+  window.removeEventListener('resize', scheduleTutorialLayout)
 })
 </script>
 
@@ -324,7 +648,7 @@ onBeforeUnmount(() => {
       <header class="hero">
         <div class="hero-copy">
           <span class="hero-copy__eyebrow">Perler Puzzle Draft</span>
-          <h1>拼豆大闯关</h1>
+          <h1>拼豆冒险屋</h1>
           <p>棋盘内随机散落拼豆，点击场内豆子即可整色激活；同色空底格可直接自动补位，收纳后也能批量回填。</p>
         </div>
 
@@ -349,10 +673,11 @@ onBeforeUnmount(() => {
           :class="{
             'is-current': levelIndex === index,
             'is-locked': index + 1 > furthestUnlocked,
-            'is-done': isCompleted(level.id)
+            'is-done': isCompleted(level.id),
+            'is-past': index < levelIndex
           }"
           type="button"
-          :disabled="isAnimating"
+          :disabled="isAnimating || isTutorialOpen || index !== levelIndex"
           @click="game.selectLevel(index)"
         >
           <span>第{{ level.badge }}关</span>
@@ -393,8 +718,10 @@ onBeforeUnmount(() => {
               </div>
 
               <div class="action-row">
-                <button class="soft-button" type="button" :disabled="isAnimating" @click="game.resetLevel">重置本关</button>
-                <button class="soft-button soft-button--primary" type="button" :disabled="isAnimating" @click="game.goToNextLevel">
+                <button class="soft-button" type="button" :disabled="isAnimating || isTutorialOpen" @click="game.resetLevel">
+                  重置本关
+                </button>
+                <button class="soft-button soft-button--primary" type="button" :disabled="isAnimating || isTutorialOpen" @click="game.goToNextLevel">
                   下一关
                 </button>
               </div>
@@ -409,8 +736,8 @@ onBeforeUnmount(() => {
               :entering-board-keys="enteringBoardKeys"
               :leaving-board-keys="leavingBoardKeys"
               :interaction-locked="isAnimating"
-              @cell-click="game.placeBead"
-              @clear-selection="game.clearSelection('empty')"
+              @cell-click="handleBoardCellClick"
+              @clear-selection="handleClearSelection"
             />
           </section>
         </main>
@@ -439,7 +766,9 @@ onBeforeUnmount(() => {
               <span class="info-card__icon info-card__icon--soft">♥</span>
               <strong>社区与支持</strong>
             </div>
-            <button class="info-card__cta" type="button" :disabled="isAnimating" @click="openSupportModal">请作者喝一杯奶茶</button>
+            <button class="info-card__cta" type="button" :disabled="isAnimating || isTutorialOpen" @click="openSupportModal">
+              请作者喝一杯奶茶
+            </button>
             <p>这里先作为展示位，后面可以替换成公告、活动入口或者帮助说明。</p>
           </section>
         </aside>
@@ -455,8 +784,8 @@ onBeforeUnmount(() => {
         :entering-tray-indexes="enteringTrayIndexes"
         :leaving-tray-indexes="leavingTrayIndexes"
         :interaction-locked="isAnimating"
-        @collect="game.collectActiveColor"
-        @select-color="game.selectTrayColor"
+        @collect="handleCollect"
+        @select-color="handleTraySelect"
       />
     </div>
 
@@ -472,7 +801,7 @@ onBeforeUnmount(() => {
 
         <div class="support-modal__body">
           <p>如果您希望这个项目继续发展，可以请作者喝一杯奶茶。</p>
-          <p>您的支持是作者把项目继续下去的动力。</p>
+          <p>您的支持是作者把项目继续做下去的动力。</p>
         </div>
 
         <div class="support-modal__qr-frame">
@@ -504,9 +833,35 @@ onBeforeUnmount(() => {
         <div class="result-modal__actions">
           <button class="soft-button" type="button" @click="copyResultShare">复制分享图</button>
           <button class="soft-button" type="button" @click="closeResultModal">稍后再看</button>
-          <button class="soft-button soft-button--primary" type="button" @click="goNextFromResult">继续下一关</button>
+          <button class="soft-button soft-button--primary" type="button" @click="restartFromResult">再来一遍</button>
         </div>
         <p v-if="shareCopyStatus" class="result-modal__share-status">{{ shareCopyStatus }}</p>
+      </div>
+    </div>
+
+    <div v-if="isTutorialOpen" class="guide-overlay">
+      <div v-if="tutorialFocusRect" class="guide-overlay__focus" :style="tutorialFocusStyle"></div>
+
+      <div class="guide-bubble" :style="tutorialBubbleStyle">
+        <div class="guide-bubble__head">
+          <span class="guide-bubble__badge">{{ currentTutorialStep.badge }}</span>
+          <button class="guide-bubble__skip" type="button" @click="finishTutorial">跳过</button>
+        </div>
+        <div class="guide-bubble__content">
+          <span class="guide-bubble__hand">☞</span>
+          <div>
+            <strong>{{ currentTutorialStep.title }}</strong>
+            <p>{{ currentTutorialStep.body }}</p>
+          </div>
+        </div>
+        <div class="guide-bubble__dots">
+          <span
+            v-for="(step, index) in tutorialSteps"
+            :key="step.id"
+            class="guide-bubble__dot"
+            :class="{ 'is-current': tutorialStepIndex === index }"
+          ></span>
+        </div>
       </div>
     </div>
   </div>

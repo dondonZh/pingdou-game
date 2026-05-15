@@ -2,7 +2,7 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { colorMetaMap, createLevelBoard, levels } from './levels'
 import type { BoardMatrix, ClearSummary, ColorId, PlacementCell, PlacementRecord, ToolState } from './types'
 
-const SECRET_WIN_CODE = 'olaolaola'
+const SECRET_WIN_CODE = 'ssxxbaba'
 const ANIMATION_PREPARE_MS = 8
 const ANIMATION_STEP_MS = 24
 const ANIMATION_BUSY_MESSAGE = '拼豆正在移动，等它们落位后再继续操作。'
@@ -526,8 +526,8 @@ export const useBeadGame = () => {
       return
     }
 
-    if (nextIndex + 1 > furthestUnlocked.value) {
-      message.value = '先通关前一关，新的拼豆盘才会解锁。'
+    if (nextIndex !== levelIndex.value) {
+      message.value = '当前是线性闯关模式，前面的关卡要等全部通关后再来一遍。'
       return
     }
 
@@ -597,6 +597,13 @@ export const useBeadGame = () => {
     const color = tray.value[slotIndex]
     if (!color) {
       message.value = '这个收纳格里还没有拼豆。'
+      return
+    }
+
+    if (selectedTrayColor.value === color) {
+      selectedTrayColor.value = null
+      activeBoardColor.value = null
+      message.value = `已取消 ${colorMetaMap[color].name} 的激活状态。`
       return
     }
 
@@ -847,6 +854,20 @@ export const useBeadGame = () => {
     loadLevel(levelIndex.value + 1)
   }
 
+  const restartRun = () => {
+    if (guardAnimation()) {
+      return
+    }
+
+    completedLevelIds.value = []
+    furthestUnlocked.value = 1
+    levelClearTimes.value = {}
+    levelCheatUsage.value = {}
+    lastClearSummary.value = null
+    levelIndex.value = 0
+    resetLevel()
+  }
+
   const forceWin = () => {
     if (status.value !== 'playing' || guardAnimation()) {
       return
@@ -944,6 +965,7 @@ export const useBeadGame = () => {
     placeBead,
     progress,
     resetLevel,
+    restartRun,
     selectLevel,
     selectTrayColor,
     selectedTrayColor,

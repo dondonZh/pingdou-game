@@ -77,6 +77,7 @@ const resetDragHover = () => {
 <template>
   <section
     class="tray-panel"
+    data-tutorial-id="tray-panel"
     :class="{
       'is-collect-ready': !!activeBoardColor,
       'is-collect-hover': isDragCollectHover
@@ -92,7 +93,13 @@ const resetDragHover = () => {
         <strong>{{ trayTotal }}/{{ capacity }}</strong>
       </div>
 
-      <button class="collect-button" type="button" :disabled="interactionLocked" @click="emit('collect')">
+      <button
+        class="collect-button"
+        type="button"
+        data-tutorial-id="collect-button"
+        :disabled="interactionLocked"
+        @click="emit('collect')"
+      >
         <span class="collect-dot" :class="{ 'is-ready': !!activeBoardColor }"></span>
         收纳激活颜色
       </button>
@@ -114,6 +121,7 @@ const resetDragHover = () => {
           }
         ]"
         type="button"
+        :data-tutorial-id="`tray-slot-${slot.index}`"
         :disabled="interactionLocked"
         @click="handleSlotClick(slot.index)"
       >

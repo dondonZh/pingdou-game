@@ -36,6 +36,7 @@ const handleDragStart = (event: DragEvent, cell: BoardCell | null) => {
 <template>
   <div
     class="board-shell"
+    data-tutorial-id="board-area"
     :style="{ '--board-accent': boardAccent ?? 'rgba(176, 164, 221, 0.55)' }"
     @click.self="emit('clear-selection')"
   >
@@ -68,6 +69,7 @@ const handleDragStart = (event: DragEvent, cell: BoardCell | null) => {
               }
             ]"
             type="button"
+            :data-tutorial-id="`board-cell-${rowIndex}-${cellIndex}`"
             :disabled="interactionLocked"
             :draggable="!!cell.beadColor && activeBoardColor === cell.beadColor"
             @click="emit('cell-click', rowIndex, cellIndex)"
