@@ -1,6 +1,11 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { colorMetaMap, createLevelBoard, levels } from './levels'
-import type { BoardMatrix, ColorId, PlacementCell, PlacementRecord, ToolState } from './types'
+import type { BoardMatrix, ClearSummary, ColorId, PlacementCell, PlacementRecord, ToolState } from './types'
+
+const SECRET_WIN_CODE = 'olaolaola'
+const ANIMATION_PREPARE_MS = 8
+const ANIMATION_STEP_MS = 24
+const ANIMATION_BUSY_MESSAGE = '拼豆正在移动，等它们落位后再继续操作。'
 
 const createTray = (capacity: number): Array<ColorId | null> => Array.from({ length: capacity }, () => null)
 
@@ -90,6 +95,14 @@ const getMovableBoardCells = (board: BoardMatrix, color: ColorId): PlacementCell
   return movable
 }
 
+const sleep = (duration: number) => new Promise<void>((resolve) => window.setTimeout(resolve, duration))
+
+const createCellKey = (row: number, col: number) => `${row}:${col}`
+
+const appendUnique = <T>(list: T[], value: T) => (list.includes(value) ? list : [...list, value])
+
+const removeValue = <T>(list: T[], value: T) => list.filter((item) => item !== value)
+
 export const useBeadGame = () => {
   const levelIndex = ref(0)
   const board = ref<BoardMatrix>([])
@@ -102,8 +115,19 @@ export const useBeadGame = () => {
   const status = ref<'playing' | 'won' | 'lost'>('playing')
   const secondsLeft = ref(levels[0].timeLimit)
   const message = ref('先点棋盘里的任意一颗拼豆，激活整场同色豆子。')
+  const lastClearSummary = ref<ClearSummary | null>(null)
   const history = ref<PlacementRecord[]>([])
+  const levelClearTimes = ref<Record<number, number>>({})
+  const levelCheatUsage = ref<Record<number, boolean>>({})
+  const isAnimating = ref(false)
+  const enteringBoardKeys = ref<string[]>([])
+  const leavingBoardKeys = ref<string[]>([])
+  const enteringTrayIndexes = ref<number[]>([])
+  const leavingTrayIndexes = ref<number[]>([])
+
   let timerId: number | null = null
+  let cheatUsedForCurrentRun = false
+  let secretKeyBuffer = ''
 
   const currentLevel = computed(() => levels[levelIndex.value])
   const boardSize = computed(() => ({
@@ -190,10 +214,238 @@ export const useBeadGame = () => {
     }
   }
 
+  const clearAnimationMarkers = () => {
+    enteringBoardKeys.value = []
+    leavingBoardKeys.value = []
+    enteringTrayIndexes.value = []
+    leavingTrayIndexes.value = []
+  }
+
+  const guardAnimation = (): boolean => {
+    if (!isAnimating.value) {
+      return false
+    }
+
+    message.value = ANIMATION_BUSY_MESSAGE
+    return true
+  }
+
+  const markBoardEntering = (row: number, col: number) => {
+    enteringBoardKeys.value = appendUnique(enteringBoardKeys.value, createCellKey(row, col))
+  }
+
+  const unmarkBoardEntering = (row: number, col: number) => {
+    enteringBoardKeys.value = removeValue(enteringBoardKeys.value, createCellKey(row, col))
+  }
+
+  const markBoardLeaving = (row: number, col: number) => {
+    leavingBoardKeys.value = appendUnique(leavingBoardKeys.value, createCellKey(row, col))
+  }
+
+  const unmarkBoardLeaving = (row: number, col: number) => {
+    leavingBoardKeys.value = removeValue(leavingBoardKeys.value, createCellKey(row, col))
+  }
+
+  const markTrayEntering = (index: number) => {
+    enteringTrayIndexes.value = appendUnique(enteringTrayIndexes.value, index)
+  }
+
+  const unmarkTrayEntering = (index: number) => {
+    enteringTrayIndexes.value = removeValue(enteringTrayIndexes.value, index)
+  }
+
+  const markTrayLeaving = (index: number) => {
+    leavingTrayIndexes.value = appendUnique(leavingTrayIndexes.value, index)
+  }
+
+  const unmarkTrayLeaving = (index: number) => {
+    leavingTrayIndexes.value = removeValue(leavingTrayIndexes.value, index)
+  }
+
+  const runAnimatedSteps = async (runner: () => Promise<void>) => {
+    isAnimating.value = true
+    clearAnimationMarkers()
+
+    try {
+      await runner()
+    } finally {
+      clearAnimationMarkers()
+      isAnimating.value = false
+    }
+  }
+
+  const animateBoardToTray = async (color: ColorId, sourceCells: PlacementCell[], targetTrayIndexes: number[]) => {
+    await runAnimatedSteps(async () => {
+      for (let index = 0; index < sourceCells.length; index += 1) {
+        const source = sourceCells[index]
+        const trayIndex = targetTrayIndexes[index]
+        const sourceCell = board.value[source.row]?.[source.col]
+
+        if (!sourceCell || sourceCell.beadColor !== color) {
+          continue
+        }
+
+        markBoardLeaving(source.row, source.col)
+        await sleep(ANIMATION_PREPARE_MS)
+
+        sourceCell.beadColor = null
+        unmarkBoardLeaving(source.row, source.col)
+
+        tray.value[trayIndex] = color
+        markTrayEntering(trayIndex)
+        await sleep(ANIMATION_STEP_MS)
+        unmarkTrayEntering(trayIndex)
+      }
+    })
+  }
+
+  const animateBoardToBoard = async (color: ColorId, sourceCells: PlacementCell[], targetCells: PlacementCell[]) => {
+    await runAnimatedSteps(async () => {
+      for (let index = 0; index < targetCells.length; index += 1) {
+        const source = sourceCells[index]
+        const target = targetCells[index]
+        const sourceCell = board.value[source.row]?.[source.col]
+        const targetCell = board.value[target.row]?.[target.col]
+
+        if (!sourceCell || !targetCell || sourceCell.beadColor !== color || targetCell.beadColor !== null) {
+          continue
+        }
+
+        markBoardLeaving(source.row, source.col)
+        await sleep(ANIMATION_PREPARE_MS)
+
+        sourceCell.beadColor = null
+        unmarkBoardLeaving(source.row, source.col)
+
+        targetCell.beadColor = color
+        markBoardEntering(target.row, target.col)
+        await sleep(ANIMATION_STEP_MS)
+        unmarkBoardEntering(target.row, target.col)
+      }
+    })
+  }
+
+  const animateTrayToBoard = async (color: ColorId, sourceTrayIndexes: number[], targetCells: PlacementCell[]) => {
+    await runAnimatedSteps(async () => {
+      for (let index = 0; index < targetCells.length; index += 1) {
+        const trayIndex = sourceTrayIndexes[index]
+        const target = targetCells[index]
+        const targetCell = board.value[target.row]?.[target.col]
+
+        if (tray.value[trayIndex] !== color || !targetCell || targetCell.beadColor !== null) {
+          continue
+        }
+
+        markTrayLeaving(trayIndex)
+        await sleep(ANIMATION_PREPARE_MS)
+
+        tray.value[trayIndex] = null
+        unmarkTrayLeaving(trayIndex)
+
+        targetCell.beadColor = color
+        markBoardEntering(target.row, target.col)
+        await sleep(ANIMATION_STEP_MS)
+        unmarkBoardEntering(target.row, target.col)
+      }
+    })
+  }
+
+  const buildClearSummary = (): ClearSummary => {
+    const elapsedSeconds = levels.reduce((total, level) => total + (levelClearTimes.value[level.id] ?? 0), 0)
+    const anyCheatUsed = levels.some((level) => !!levelCheatUsage.value[level.id])
+
+    if (anyCheatUsed) {
+      return {
+        levelId: currentLevel.value.id,
+        levelName: '全部通关',
+        elapsedSeconds,
+        title: '官方外挂体验官',
+        tagline: '彩蛋通道已开启，这次通关按内部测试记录结算。',
+        cheatUsed: true
+      }
+    }
+
+    if (elapsedSeconds <= 180) {
+      return {
+        levelId: currentLevel.value.id,
+        levelName: '全部通关',
+        elapsedSeconds,
+        title: '大魔王',
+        tagline: '三分钟内强势清盘，这局已经是碾压节奏。',
+        cheatUsed: false
+      }
+    }
+
+    if (elapsedSeconds <= 300) {
+      return {
+        levelId: currentLevel.value.id,
+        levelName: '全部通关',
+        elapsedSeconds,
+        title: '拼豆统帅',
+        tagline: '节奏又稳又快，整盘归位几乎没有浪费动作。',
+        cheatUsed: false
+      }
+    }
+
+    if (elapsedSeconds <= 480) {
+      return {
+        levelId: currentLevel.value.id,
+        levelName: '全部通关',
+        elapsedSeconds,
+        title: '归位宗师',
+        tagline: '布局判断很扎实，整体推进感已经很成熟了。',
+        cheatUsed: false
+      }
+    }
+
+    if (elapsedSeconds <= 720) {
+      return {
+        levelId: currentLevel.value.id,
+        levelName: '全部通关',
+        elapsedSeconds,
+        title: '收纳大师',
+        tagline: '稳稳推进也很强，属于不冒进但很可靠的通关型选手。',
+        cheatUsed: false
+      }
+    }
+
+    return {
+      levelId: currentLevel.value.id,
+      levelName: '全部通关',
+      elapsedSeconds,
+      title: '耐心匠人',
+      tagline: '慢工出细活，把每一步都处理得很认真。',
+      cheatUsed: false
+    }
+  }
+
+  const finalizeWin = () => {
+    const elapsedSeconds = Math.max(currentLevel.value.timeLimit - secondsLeft.value, 0)
+
+    status.value = 'won'
+    clearTimer()
+
+    if (!completedLevelIds.value.includes(currentLevel.value.id)) {
+      completedLevelIds.value.push(currentLevel.value.id)
+    }
+
+    levelClearTimes.value = {
+      ...levelClearTimes.value,
+      [currentLevel.value.id]: elapsedSeconds
+    }
+    levelCheatUsage.value = {
+      ...levelCheatUsage.value,
+      [currentLevel.value.id]: cheatUsedForCurrentRun
+    }
+
+    furthestUnlocked.value = Math.min(levels.length, Math.max(furthestUnlocked.value, levelIndex.value + 2))
+    lastClearSummary.value = Object.keys(levelClearTimes.value).length === levels.length ? buildClearSummary() : null
+  }
+
   const startTimer = () => {
     clearTimer()
     timerId = window.setInterval(() => {
-      if (status.value !== 'playing') {
+      if (status.value !== 'playing' || isAnimating.value) {
         return
       }
 
@@ -210,6 +462,10 @@ export const useBeadGame = () => {
   }
 
   const resetLevel = () => {
+    if (guardAnimation()) {
+      return
+    }
+
     board.value = createLevelBoard(currentLevel.value)
     tray.value = createTray(currentLevel.value.capacity)
     tools.value = createTools()
@@ -218,6 +474,16 @@ export const useBeadGame = () => {
     status.value = 'playing'
     secondsLeft.value = currentLevel.value.timeLimit
     history.value = []
+    lastClearSummary.value = null
+    cheatUsedForCurrentRun = false
+    secretKeyBuffer = ''
+    clearAnimationMarkers()
+
+    if (levelIndex.value === 0) {
+      levelClearTimes.value = {}
+      levelCheatUsage.value = {}
+    }
+
     message.value = `第 ${currentLevel.value.badge} 关开始，先从棋盘里挑一种颜色激活。`
     startTimer()
   }
@@ -228,6 +494,10 @@ export const useBeadGame = () => {
   }
 
   const clearSelection = (reason?: 'outside' | 'empty') => {
+    if (isAnimating.value) {
+      return
+    }
+
     const hadBoardActive = !!activeBoardColor.value
     const hadTraySelected = !!selectedTrayColor.value
 
@@ -252,6 +522,10 @@ export const useBeadGame = () => {
   }
 
   const selectLevel = (nextIndex: number) => {
+    if (guardAnimation()) {
+      return
+    }
+
     if (nextIndex + 1 > furthestUnlocked.value) {
       message.value = '先通关前一关，新的拼豆盘才会解锁。'
       return
@@ -261,27 +535,27 @@ export const useBeadGame = () => {
   }
 
   const activateBoardColor = (color: ColorId) => {
-    if (status.value !== 'playing') {
+    if (status.value !== 'playing' || guardAnimation()) {
       return
     }
 
     activeBoardColor.value = color
     selectedTrayColor.value = null
-    message.value = `${colorMetaMap[color].name} 已悬浮激活，点击“收纳激活颜色”把它们收入收纳槽。`
+    message.value = `${colorMetaMap[color].name} 已激活，点底色相同的空格可自动补位，也可以先收进收纳槽。`
   }
 
-  const collectActiveColor = () => {
-    if (status.value !== 'playing') {
+  const collectActiveColor = async () => {
+    if (status.value !== 'playing' || guardAnimation()) {
       return
     }
 
     if (!activeBoardColor.value) {
-      message.value = '还没有激活颜色，先点棋盘里任意一颗拼豆。'
+      message.value = '还没有激活颜色，先点棋盘里的任意一颗拼豆。'
       return
     }
 
     const targetColor = activeBoardColor.value
-    const looseCells: Array<{ row: number; col: number }> = []
+    const looseCells: PlacementCell[] = []
 
     board.value.forEach((row, rowIndex) => {
       row.forEach((cell, colIndex) => {
@@ -291,32 +565,19 @@ export const useBeadGame = () => {
       })
     })
 
-    const freeSlots = currentLevel.value.capacity - trayTotal.value
-    const collectCount = Math.min(looseCells.length, freeSlots)
+    const freeTrayIndexes = tray.value
+      .map((item, index) => ({ item, index }))
+      .filter((entry) => entry.item === null)
+      .map((entry) => entry.index)
+
+    const collectCount = Math.min(looseCells.length, freeTrayIndexes.length)
 
     if (collectCount <= 0) {
       message.value = '收纳槽已经满了，先放回一些拼豆再继续收纳。'
       return
     }
 
-    looseCells.slice(0, collectCount).forEach(({ row, col }) => {
-      const cell = board.value[row]?.[col]
-      if (cell) {
-        cell.beadColor = null
-      }
-    })
-
-    let inserted = 0
-    for (let index = 0; index < tray.value.length; index += 1) {
-      if (tray.value[index] === null) {
-        tray.value[index] = targetColor
-        inserted += 1
-      }
-
-      if (inserted >= collectCount) {
-        break
-      }
-    }
+    await animateBoardToTray(targetColor, looseCells.slice(0, collectCount), freeTrayIndexes.slice(0, collectCount))
 
     selectedTrayColor.value = targetColor
     activeBoardColor.value = null
@@ -325,10 +586,14 @@ export const useBeadGame = () => {
     message.value =
       leftOnBoard > 0
         ? `已收纳 ${collectCount} 颗${colorMetaMap[targetColor].name}，还有 ${leftOnBoard} 颗留在棋盘里。`
-        : `已收纳 ${collectCount} 颗${colorMetaMap[targetColor].name}，去填同色空位吧。`
+        : `已收纳 ${collectCount} 颗${colorMetaMap[targetColor].name}，去填空位吧。`
   }
 
   const selectTrayColor = (slotIndex: number) => {
+    if (guardAnimation()) {
+      return
+    }
+
     const color = tray.value[slotIndex]
     if (!color) {
       message.value = '这个收纳格里还没有拼豆。'
@@ -337,11 +602,11 @@ export const useBeadGame = () => {
 
     selectedTrayColor.value = color
     activeBoardColor.value = null
-    message.value = `已选中${colorMetaMap[color].name}，点击棋盘里同色底格的空位进行摆放。`
+    message.value = `已选中${colorMetaMap[color].name}，点击棋盘底色区域就会按连通块批量摆放。`
   }
 
-  const placeBead = (row: number, col: number) => {
-    if (status.value !== 'playing') {
+  const placeBead = async (row: number, col: number) => {
+    if (status.value !== 'playing' || guardAnimation()) {
       return
     }
 
@@ -388,19 +653,7 @@ export const useBeadGame = () => {
       const filledCells = emptyCells.slice(0, fillCount)
       const usedSourceCells = movableCells.slice(0, fillCount)
 
-      usedSourceCells.forEach((position) => {
-        const sourceCell = board.value[position.row]?.[position.col]
-        if (sourceCell) {
-          sourceCell.beadColor = null
-        }
-      })
-
-      filledCells.forEach((position) => {
-        const targetCell = board.value[position.row]?.[position.col]
-        if (targetCell) {
-          targetCell.beadColor = activeBoardColor.value
-        }
-      })
+      await animateBoardToBoard(activeBoardColor.value, usedSourceCells, filledCells)
 
       history.value.push({
         color: activeBoardColor.value,
@@ -415,13 +668,7 @@ export const useBeadGame = () => {
       }
 
       if (boardIsSolved(board.value) && trayTotal.value === 0) {
-        status.value = 'won'
-        clearTimer()
-        if (!completedLevelIds.value.includes(currentLevel.value.id)) {
-          completedLevelIds.value.push(currentLevel.value.id)
-        }
-
-        furthestUnlocked.value = Math.min(levels.length, Math.max(furthestUnlocked.value, levelIndex.value + 2))
+        finalizeWin()
         message.value = `${currentLevel.value.name} 已完成，继续下一关吧。`
         return
       }
@@ -429,7 +676,7 @@ export const useBeadGame = () => {
       const leftRegion = emptyCells.length - fillCount
       message.value =
         leftMovable > 0
-          ? `自动填入 ${fillCount} 颗，还有 ${leftMovable} 颗保持激活状态。`
+          ? `自动填入 ${fillCount} 颗，剩下的激活豆子还会继续悬浮。`
           : leftRegion > 0
             ? `自动填入 ${fillCount} 颗，这片区域还有 ${leftRegion} 个空位待补。`
             : `自动填入 ${fillCount} 颗，当前归位进度 ${progress.value}%。`
@@ -437,18 +684,7 @@ export const useBeadGame = () => {
     }
 
     if (!selectedTrayColor.value) {
-      if (activeBoardColor.value) {
-        clearSelection('empty')
-        return
-      }
-
       message.value = '先从收纳槽里选中一种颜色。'
-      return
-    }
-
-    const trayIndex = tray.value.findIndex((item) => item === selectedTrayColor.value)
-    if (trayIndex < 0) {
-      message.value = '这个颜色已经放完了，再去棋盘里回收一批吧。'
       return
     }
 
@@ -468,22 +704,15 @@ export const useBeadGame = () => {
       .filter((entry) => entry.item === selectedTrayColor.value)
       .map((entry) => entry.index)
 
-    const fillCount = Math.min(availableTrayIndexes.length, emptyCells.length)
-    const filledCells: PlacementCell[] = []
-
-    for (let index = 0; index < fillCount; index += 1) {
-      const position = emptyCells[index]
-      const regionCell = board.value[position.row]?.[position.col]
-      const currentTrayIndex = availableTrayIndexes[index]
-
-      if (!regionCell) {
-        continue
-      }
-
-      regionCell.beadColor = selectedTrayColor.value
-      tray.value[currentTrayIndex] = null
-      filledCells.push(position)
+    if (availableTrayIndexes.length <= 0) {
+      message.value = '这个颜色已经放完了，再去棋盘里回收一批吧。'
+      return
     }
+
+    const fillCount = Math.min(availableTrayIndexes.length, emptyCells.length)
+    const filledCells = emptyCells.slice(0, fillCount)
+
+    await animateTrayToBoard(selectedTrayColor.value, availableTrayIndexes.slice(0, fillCount), filledCells)
 
     history.value.push({
       color: selectedTrayColor.value,
@@ -496,13 +725,7 @@ export const useBeadGame = () => {
     }
 
     if (boardIsSolved(board.value) && trayTotal.value === 0) {
-      status.value = 'won'
-      clearTimer()
-      if (!completedLevelIds.value.includes(currentLevel.value.id)) {
-        completedLevelIds.value.push(currentLevel.value.id)
-      }
-
-      furthestUnlocked.value = Math.min(levels.length, Math.max(furthestUnlocked.value, levelIndex.value + 2))
+      finalizeWin()
       message.value = `${currentLevel.value.name} 已完成，继续下一关吧。`
       return
     }
@@ -514,15 +737,15 @@ export const useBeadGame = () => {
         : `这片区域已填入 ${filledCells.length} 颗，当前归位进度 ${progress.value}%。`
   }
 
-  const useMagnet = () => {
-    if (tools.value.magnet <= 0 || status.value !== 'playing') {
-      message.value = '磁力道具已经用完啦。'
+  const useMagnet = async () => {
+    if (tools.value.magnet <= 0 || status.value !== 'playing' || guardAnimation()) {
+      message.value = tools.value.magnet <= 0 ? '磁力道具已经用完啦。' : ANIMATION_BUSY_MESSAGE
       return
     }
 
     if (activeBoardColor.value) {
       tools.value.magnet -= 1
-      collectActiveColor()
+      await collectActiveColor()
       return
     }
 
@@ -540,6 +763,10 @@ export const useBeadGame = () => {
   }
 
   const useBrush = () => {
+    if (guardAnimation()) {
+      return
+    }
+
     if (tools.value.brush <= 0 || status.value !== 'playing') {
       message.value = '刷子次数已经没有了。'
       return
@@ -576,16 +803,22 @@ export const useBeadGame = () => {
     }
 
     tools.value.brush -= 1
+
     if (lastPlacement.source === 'tray') {
       selectedTrayColor.value = lastPlacement.color
       activeBoardColor.value = null
     } else {
       selectedTrayColor.value = null
     }
-    message.value = `刷子帮你撤回了 ${lastPlacement.cells.length} 颗${colorMetaMap[lastPlacement.color].name}拼豆。`
+
+    message.value = `刷子帮你撤回了 ${lastPlacement.cells.length} 颗${colorMetaMap[lastPlacement.color].name} 拼豆。`
   }
 
   const useHourglass = () => {
+    if (guardAnimation()) {
+      return
+    }
+
     if (tools.value.hourglass <= 0 || status.value !== 'playing') {
       message.value = '沙漏已经用完啦。'
       return
@@ -597,6 +830,10 @@ export const useBeadGame = () => {
   }
 
   const goToNextLevel = () => {
+    if (guardAnimation()) {
+      return
+    }
+
     if (levelIndex.value >= levels.length - 1) {
       message.value = '已经是最后一关了，这版原型你已经全通。'
       return
@@ -610,28 +847,73 @@ export const useBeadGame = () => {
     loadLevel(levelIndex.value + 1)
   }
 
+  const forceWin = () => {
+    if (status.value !== 'playing' || guardAnimation()) {
+      return
+    }
+
+    board.value.forEach((row) => {
+      row.forEach((cell) => {
+        if (!cell) {
+          return
+        }
+
+        cell.beadColor = cell.baseColor
+      })
+    })
+
+    tray.value = createTray(currentLevel.value.capacity)
+    activeBoardColor.value = null
+    selectedTrayColor.value = null
+    history.value = []
+    cheatUsedForCurrentRun = true
+    finalizeWin()
+    message.value = '官方秘籍已生效，本关直接结算通关。'
+  }
+
   const handleDocumentPointerDown = (event: PointerEvent) => {
+    if (isAnimating.value) {
+      return
+    }
+
     const target = event.target
     if (!(target instanceof HTMLElement)) {
       return
     }
 
-    const keepSelection = target.closest(
-      '.board-cell, .tray-panel, .tray-slot, .collect-button, .tool-button, .soft-button, .level-chip'
-    )
+    const keepSelection = target.closest('.board-cell, .tray-panel, .tray-slot, .collect-button, .soft-button, .level-chip')
 
     if (!keepSelection) {
       clearSelection('outside')
     }
   }
 
+  const handleSecretKeydown = (event: KeyboardEvent) => {
+    if (status.value !== 'playing') {
+      return
+    }
+
+    if (event.key.length !== 1 || event.ctrlKey || event.metaKey || event.altKey) {
+      return
+    }
+
+    secretKeyBuffer = `${secretKeyBuffer}${event.key.toLowerCase()}`.slice(-SECRET_WIN_CODE.length)
+
+    if (secretKeyBuffer === SECRET_WIN_CODE) {
+      secretKeyBuffer = ''
+      forceWin()
+    }
+  }
+
   onMounted(() => {
     document.addEventListener('pointerdown', handleDocumentPointerDown)
+    window.addEventListener('keydown', handleSecretKeydown)
   })
 
   onBeforeUnmount(() => {
     clearTimer()
     document.removeEventListener('pointerdown', handleDocumentPointerDown)
+    window.removeEventListener('keydown', handleSecretKeydown)
   })
 
   loadLevel(0)
@@ -647,9 +929,15 @@ export const useBeadGame = () => {
     collectActiveColor,
     completedLevelIds,
     currentLevel,
+    enteringBoardKeys,
+    enteringTrayIndexes,
     formatTime,
     furthestUnlocked,
     goToNextLevel,
+    isAnimating,
+    lastClearSummary,
+    leavingBoardKeys,
+    leavingTrayIndexes,
     levelIndex,
     levels,
     message,

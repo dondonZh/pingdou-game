@@ -1,4 +1,4 @@
-import type { BoardCell, BoardMatrix, BoardToken, ColorId, ColorMeta, LevelDefinition } from './types'
+import type { BoardMatrix, BoardToken, ColorId, ColorMeta, LevelDefinition } from './types'
 
 export const colorMetaMap: Record<ColorId, ColorMeta> = {
   plum: {
@@ -43,10 +43,10 @@ const toRows = (rows: string[]): BoardToken[][] => rows.map((row) => row.split('
 export const levels: LevelDefinition[] = [
   {
     id: 1,
-    name: '糖霜花篮',
+    name: '小试牛刀',
     badge: '01',
-    story: '棋盘一开始会随机散落拼豆，先点场内豆子激活同色，再回收进收纳槽。',
-    hint: '优先清理数量多的颜色，给中间大块同色底格腾位置。',
+    story: '先用一块大色区热热手，熟悉激活、收纳和回填的节奏，把这关当成开场练习最合适。',
+    hint: '优先处理中间的大块连通区域，能很快把归位节奏带起来。',
     capacity: 16,
     timeLimit: 160,
     board: toRows([
@@ -64,47 +64,46 @@ export const levels: LevelDefinition[] = [
   },
   {
     id: 2,
-    name: '奶霜海螺',
+    name: '小猫',
     badge: '02',
-    story: '随机散落会更乱一些，收纳槽不够时要先把对的颜色放回棋盘。',
-    hint: '白色和青色可以先做轮廓，粉色适合中段集中归位。',
-    capacity: 18,
+    story: '第二关换成小猫表情梗，耳朵、眼睛和脸颊会拆成更细的块面，辨识度会更强。',
+    hint: '先归位脸外圈，再补眼睛和嘴部的小块，整体会顺很多。',
+    capacity: 16,
     timeLimit: 210,
     board: toRows([
-      '...www...bb',
-      '..wwww..bbb',
-      '.wwwwww.bbb',
-      'wwlllpppbbb',
-      'wlllpppppbb',
-      '.llmmmmmbb.',
-      '.llmmmmmbb.',
-      '.llbbbbbll.',
-      '..llbbbll..',
-      '...mlllmm..',
-      '....mmmm....'
+      '...pp...pp...',
+      '..ppll.llpp..',
+      '..lllllllll..',
+      '.llwwwwwbbll.',
+      '.lwwmwwwmwwl.',
+      '.lwmmmmmmmwl.',
+      '.lwmbbbbmmwl.',
+      '.lwwmwwwmwwl.',
+      '.llwwwwwbbll.',
+      '..llpppppll..',
+      '...lllllll...'
     ])
   },
   {
     id: 3,
-    name: '夜空小鲸',
+    name: '写轮眼开',
     badge: '03',
-    story: '最后一关会频繁切色，悬浮激活和棋盘边框提示会更重要。',
-    hint: '先抓紫色和绿色的大块错位，后面左右两翼会轻松很多。',
-    capacity: 22,
+    story: '最后一关做成动漫名场面的眼睛轮廓，外圈、瞳孔和高光会形成更明显的层次。',
+    hint: '先清外圈，再处理中心区域，整盘会更容易控节奏。',
+    capacity: 16,
     timeLimit: 260,
     board: toRows([
-      '..pppp..wwww..',
-      '.ppppp..wwww..',
-      'pppppplllwww..',
-      '.pppllllllww..',
-      '..llllppppbb..',
-      '.llllpppppbbb.',
-      '.lllmmmmmbbbb.',
-      '.lllmmmmmbbbb.',
-      '..llbbbbllbb..',
-      '...mmbbbbmm...',
-      '....mmllmm....',
-      '.....mmmm.....'
+      '....ppppp....',
+      '..ppppppppp..',
+      '.ppwwwwwwwpp.',
+      'ppwwlllllwwpp',
+      'ppwllmmmllwpp',
+      '.pwlmmbmllwp.',
+      'ppwllmmmllwpp',
+      'ppwwlllllwwpp',
+      '.ppwwwwwwwpp.',
+      '..ppppppppp..',
+      '....ppppp....'
     ])
   }
 ]

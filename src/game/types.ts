@@ -27,6 +27,15 @@ export interface PlacementRecord {
   sourceCells?: PlacementCell[]
 }
 
+export interface ClearSummary {
+  levelId: number
+  levelName: string
+  elapsedSeconds: number
+  title: string
+  tagline: string
+  cheatUsed: boolean
+}
+
 export interface LevelDefinition {
   id: number
   name: string

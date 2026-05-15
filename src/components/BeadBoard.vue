@@ -7,12 +7,17 @@ defineProps<{
   activeBoardColor: ColorId | null
   selectedTrayColor: ColorId | null
   boardAccent: string | null
+  enteringBoardKeys: string[]
+  leavingBoardKeys: string[]
+  interactionLocked: boolean
 }>()
 
 const emit = defineEmits<{
   (event: 'cell-click', row: number, col: number): void
   (event: 'clear-selection'): void
 }>()
+
+const cellKey = (row: number, col: number) => `${row}:${col}`
 
 const handleDragStart = (event: DragEvent, cell: BoardCell | null) => {
   if (!cell?.beadColor) {
@@ -42,6 +47,7 @@ const handleDragStart = (event: DragEvent, cell: BoardCell | null) => {
             class="board-gap"
             type="button"
             aria-label="取消激活状态"
+            :disabled="interactionLocked"
             @click="emit('clear-selection')"
           ></button>
 
@@ -56,19 +62,18 @@ const handleDragStart = (event: DragEvent, cell: BoardCell | null) => {
                 'is-draggable': !!cell.beadColor && activeBoardColor === cell.beadColor,
                 'is-drop-target': !cell.beadColor && !!selectedTrayColor,
                 'is-correct': !!cell.beadColor && cell.beadColor === cell.baseColor,
-                'is-misplaced': !!cell.beadColor && cell.beadColor !== cell.baseColor
+                'is-misplaced': !!cell.beadColor && cell.beadColor !== cell.baseColor,
+                'is-entering': enteringBoardKeys.includes(cellKey(rowIndex, cellIndex)),
+                'is-leaving': leavingBoardKeys.includes(cellKey(rowIndex, cellIndex))
               }
             ]"
             type="button"
+            :disabled="interactionLocked"
             :draggable="!!cell.beadColor && activeBoardColor === cell.beadColor"
             @click="emit('cell-click', rowIndex, cellIndex)"
             @dragstart="handleDragStart($event, cell)"
           >
-            <span
-              v-if="cell.beadColor"
-              class="board-cell__bead"
-              :class="[`bead--${cell.beadColor}`]"
-            >
+            <span v-if="cell.beadColor" class="board-cell__bead" :class="[`bead--${cell.beadColor}`]">
               <span class="bead__shine"></span>
             </span>
             <span v-else class="board-cell__socket"></span>
