@@ -124,6 +124,7 @@ const tutorialFocusRect = ref<FocusRect | null>(null)
 
 let autoAdvanceTimer: number | null = null
 let tutorialLayoutFrame: number | null = null
+let tutorialResizeObserver: ResizeObserver | null = null
 
 const currentTutorialStep = computed(() => tutorialSteps[tutorialStepIndex.value] ?? tutorialSteps[0])
 
@@ -154,6 +155,13 @@ const closeResultModal = () => {
   shareCopyStatus.value = ''
 }
 
+const reopenTutorial = async () => {
+  closeSupportModal()
+  closeResultModal()
+  clearAutoAdvanceTimer()
+  await startGuidedTutorial()
+}
+
 const clearAutoAdvanceTimer = () => {
   if (autoAdvanceTimer !== null) {
     window.clearTimeout(autoAdvanceTimer)
@@ -168,9 +176,25 @@ const cancelTutorialLayout = () => {
   }
 }
 
+const resetTutorialObservers = () => {
+  tutorialResizeObserver?.disconnect()
+  tutorialResizeObserver = null
+}
+
 const restartFromResult = () => {
   closeResultModal()
   game.restartRun()
+}
+
+const downloadBlob = (blob: Blob, filename: string) => {
+  const url = URL.createObjectURL(blob)
+  const anchor = document.createElement('a')
+  anchor.href = url
+  anchor.download = filename
+  document.body.appendChild(anchor)
+  anchor.click()
+  anchor.remove()
+  window.setTimeout(() => URL.revokeObjectURL(url), 1200)
 }
 
 const finishTutorial = () => {
@@ -201,6 +225,7 @@ const getTutorialTargetId = (): string => {
 const updateTutorialLayout = async () => {
   if (!isTutorialOpen.value) {
     tutorialFocusRect.value = null
+    resetTutorialObservers()
     return
   }
 
@@ -210,6 +235,7 @@ const updateTutorialLayout = async () => {
   const element = document.querySelector<HTMLElement>(`[data-tutorial-id="${targetId}"]`)
   if (!element) {
     tutorialFocusRect.value = null
+    resetTutorialObservers()
     return
   }
 
@@ -223,6 +249,20 @@ const updateTutorialLayout = async () => {
     width: rect.width + padding * 2,
     height: rect.height + padding * 2,
     radius: isCell ? 18 : 22
+  }
+
+  if ('ResizeObserver' in window) {
+    resetTutorialObservers()
+    tutorialResizeObserver = new ResizeObserver(() => {
+      scheduleTutorialLayout()
+    })
+
+    tutorialResizeObserver.observe(element)
+
+    const pageShell = document.querySelector<HTMLElement>('.page-shell')
+    if (pageShell) {
+      tutorialResizeObserver.observe(pageShell)
+    }
   }
 }
 
@@ -363,7 +403,24 @@ const tutorialBubbleStyle = computed(() => {
     return {}
   }
 
+  const isMobileViewport = window.matchMedia('(max-width: 720px)').matches
   const width = 320
+
+  if (isMobileViewport) {
+    const bubbleHeight = 212
+    const gap = 18
+    const placeAbove = rect.top > window.innerHeight * 0.45
+    const top = placeAbove
+      ? Math.max(12, rect.top - bubbleHeight - gap)
+      : Math.min(window.innerHeight - bubbleHeight - 12, rect.top + rect.height + gap)
+
+    return {
+      top: `${top}px`,
+      left: '12px',
+      right: '12px'
+    }
+  }
+
   const preferRight = rect.left + rect.width + width + 40 < window.innerWidth
   const left = preferRight ? rect.left + rect.width + 18 : Math.max(16, rect.left - width - 18)
   const top = Math.min(Math.max(20, rect.top + rect.height / 2 - 96), window.innerHeight - 240)
@@ -484,7 +541,7 @@ const renderShareCanvas = () => {
   context.fill()
   context.fillStyle = '#9b77d8'
   context.font = '700 24px Trebuchet MS'
-  context.fillText('PERLER PUZZLE DRAFT', 130, 121)
+  context.fillText('PERLER PUZZLE', 130, 121)
 
   context.fillStyle = '#7f6fb6'
   context.font = '700 88px Microsoft YaHei'
@@ -566,6 +623,29 @@ const copyResultShare = async () => {
     canvas.toBlob((value) => resolve(value), 'image/png')
   })
 
+  if (blob) {
+    const shareFile = new File([blob], 'pingdou-result.png', { type: 'image/png' })
+    const canShareFile = navigator.canShare ? navigator.canShare({ files: [shareFile] }) : true
+
+    if (navigator.share && canShareFile) {
+      try {
+        await navigator.share({
+          files: [shareFile],
+          title: '拼豆冒险屋通关战报',
+          text: `我在拼豆冒险屋全部通关，总用时 ${formatElapsed(clearSummary.value.elapsedSeconds)}，获得称号：${clearSummary.value.title}。`
+        })
+        shareCopyStatus.value = '分享面板已打开'
+        return
+      } catch (error) {
+        if ((error as Error).name !== 'AbortError') {
+          downloadBlob(blob, 'pingdou-result.png')
+          shareCopyStatus.value = '当前环境已改为下载分享图'
+          return
+        }
+      }
+    }
+  }
+
   if (blob && navigator.clipboard && 'ClipboardItem' in window) {
     try {
       await navigator.clipboard.write([new window.ClipboardItem({ 'image/png': blob })])
@@ -574,6 +654,12 @@ const copyResultShare = async () => {
     } catch {
       // fall through to text copy
     }
+  }
+
+  if (blob) {
+    downloadBlob(blob, 'pingdou-result.png')
+    shareCopyStatus.value = '当前环境已下载分享图'
+    return
   }
 
   try {
@@ -625,6 +711,7 @@ watch(
 onMounted(() => {
   window.addEventListener('keydown', handleWindowKeydown)
   window.addEventListener('resize', scheduleTutorialLayout)
+  window.addEventListener('scroll', scheduleTutorialLayout, true)
 
   if (!window.localStorage.getItem(TUTORIAL_STORAGE_KEY)) {
     void startGuidedTutorial()
@@ -634,8 +721,10 @@ onMounted(() => {
 onBeforeUnmount(() => {
   clearAutoAdvanceTimer()
   cancelTutorialLayout()
+  resetTutorialObservers()
   window.removeEventListener('keydown', handleWindowKeydown)
   window.removeEventListener('resize', scheduleTutorialLayout)
+  window.removeEventListener('scroll', scheduleTutorialLayout, true)
 })
 </script>
 
@@ -647,7 +736,7 @@ onBeforeUnmount(() => {
     <div class="main-shell">
       <header class="hero">
         <div class="hero-copy">
-          <span class="hero-copy__eyebrow">Perler Puzzle Draft</span>
+          <span class="hero-copy__eyebrow">Perler Puzzle</span>
           <h1>拼豆大闯关</h1>
           <p>棋盘内随机散落拼豆，点击场内豆子即可整色激活；同色空底格可直接自动补位，收纳后也能批量回填。</p>
         </div>
@@ -738,6 +827,21 @@ onBeforeUnmount(() => {
               @clear-selection="handleClearSelection"
             />
           </section>
+
+          <TrayDock
+            class="play-layout__tray"
+            :capacity="currentLevel.capacity"
+            :tray-total="trayTotal"
+            :tray-slots="traySlots"
+            :selected-tray-color="selectedTrayColor"
+            :active-board-color="activeBoardColor"
+            :palette="game.colorMetaMap"
+            :entering-tray-indexes="enteringTrayIndexes"
+            :leaving-tray-indexes="leavingTrayIndexes"
+            :interaction-locked="isAnimating"
+            @collect="handleCollect"
+            @select-color="handleTraySelect"
+          />
         </main>
 
         <aside class="info-rail">
@@ -757,6 +861,7 @@ onBeforeUnmount(() => {
             </div>
             <p>先在棋盘里点豆子激活同色，再决定直接回填，还是先收进 16 格收纳槽备用。</p>
             <p>如果一片区域填不完，剩下的豆子会继续保持激活状态，方便你接着补下一块。</p>
+            <button class="info-card__ghost" type="button" :disabled="isTutorialOpen" @click="reopenTutorial">重新查看规则</button>
           </section>
 
           <section class="info-card">
@@ -769,20 +874,6 @@ onBeforeUnmount(() => {
           </section>
         </aside>
       </div>
-
-      <TrayDock
-        :capacity="currentLevel.capacity"
-        :tray-total="trayTotal"
-        :tray-slots="traySlots"
-        :selected-tray-color="selectedTrayColor"
-        :active-board-color="activeBoardColor"
-        :palette="game.colorMetaMap"
-        :entering-tray-indexes="enteringTrayIndexes"
-        :leaving-tray-indexes="leavingTrayIndexes"
-        :interaction-locked="isAnimating"
-        @collect="handleCollect"
-        @select-color="handleTraySelect"
-      />
     </div>
 
     <div v-if="isSupportModalOpen" class="support-modal-backdrop" @click="closeSupportModal">

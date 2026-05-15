@@ -52,6 +52,25 @@ button:disabled {
   padding: 10px 8px 10px 0;
 }
 
+@media (min-width: 1121px) {
+  html,
+  body,
+  #app {
+    min-width: 1280px;
+    min-height: 860px;
+  }
+
+  body {
+    overflow: auto;
+  }
+
+  .page-shell {
+    min-width: 1260px;
+    min-height: 860px;
+    height: max(100vh, 860px);
+  }
+}
+
 .page-glow {
   position: absolute;
   z-index: 0;
@@ -186,6 +205,19 @@ button:disabled {
   box-shadow: 0 10px 20px rgba(201, 103, 69, 0.2);
   cursor: pointer;
   font-size: 14px;
+  font-weight: 700;
+}
+
+.info-card__ghost {
+  margin-top: 12px;
+  border: 1px solid rgba(142, 128, 191, 0.26);
+  border-radius: 999px;
+  padding: 9px 14px;
+  background: rgba(255, 255, 255, 0.74);
+  color: #7a6ab0;
+  box-shadow: var(--shadow-soft);
+  cursor: pointer;
+  font-size: 12px;
   font-weight: 700;
 }
 
@@ -342,6 +374,11 @@ button:disabled {
   height: 100%;
 }
 
+.play-layout__tray {
+  grid-column: 1 / -1;
+  margin-top: 0;
+}
+
 .side-card,
 .playfield-card {
   border-radius: 20px;
@@ -491,12 +528,15 @@ button:disabled {
   display: flex;
   align-items: center;
   justify-content: center;
+  overflow: hidden;
 }
 
 .board-grid {
+  --board-gap: 2px;
   display: grid;
-  gap: 2px;
-  width: min(620px, 58%);
+  gap: var(--board-gap);
+  max-width: 100%;
+  max-height: 100%;
   align-content: center;
   margin: 0 auto;
 }
@@ -1014,6 +1054,7 @@ button:disabled {
 .guide-overlay__focus {
   position: fixed;
   border-radius: 20px;
+  pointer-events: none;
   box-shadow:
     0 0 0 9999px rgba(0, 0, 0, 0.78),
     0 0 0 3px rgba(255, 255, 255, 0.92),
@@ -1207,13 +1248,28 @@ button:disabled {
 }
 
 @media (max-width: 1120px) {
+  html,
+  body,
+  #app {
+    min-width: 0;
+    min-height: 100%;
+  }
+
   body {
     overflow: auto;
   }
 
   .page-shell {
+    width: min(100%, calc(100% - 20px));
     height: auto;
+    min-height: 100vh;
+    padding: 10px 0 18px;
     padding-left: 0;
+  }
+
+  .main-shell {
+    height: auto;
+    min-height: calc(100vh - 28px);
   }
 
   .content-row {
@@ -1222,6 +1278,7 @@ button:disabled {
 
   .play-layout {
     grid-template-columns: 1fr;
+    height: auto;
   }
 
   .info-rail {
@@ -1238,23 +1295,170 @@ button:disabled {
   }
 }
 
-@media (max-width: 720px) {
+@media (max-width: 900px) {
   .page-shell {
-    width: min(100% - 16px, 100%);
-    padding-top: 14px;
+    width: min(100%, calc(100% - 18px));
+    padding: 10px 0 16px;
+  }
+
+  .main-shell {
+    gap: 10px;
+  }
+
+  .hero {
+    gap: 10px;
+  }
+
+  .hero-copy,
+  .hero p {
+    max-width: none;
+  }
+
+  .hero-hud {
+    width: 100%;
+    min-width: 0;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .content-row {
+    gap: 10px;
+  }
+
+  .play-layout {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .playfield-card {
+    order: -2;
+  }
+
+  .play-layout__tray {
+    order: -1;
+  }
+
+  .side-card,
+  .playfield-card,
+  .tray-panel,
+  .info-card {
+    border-radius: 18px;
+  }
+
+  .side-card,
+  .playfield-card {
+    height: auto;
+  }
+
+  .side-card {
+    padding: 12px;
+  }
+
+  .playfield-card {
+    padding: 10px;
+  }
+
+  .playfield-card__top {
+    align-items: flex-start;
+  }
+
+  .board-shell {
+    min-height: auto;
+    padding: 8px;
+    border-width: 2px;
+    box-shadow:
+      0 0 0 4px rgba(255, 255, 255, 0.48),
+      0 12px 22px rgba(120, 104, 179, 0.14);
+  }
+
+  .board-grid {
+    --board-gap: 1.5px;
+  }
+
+  .board-cell {
+    border-radius: 5px;
+  }
+
+  .board-cell__socket {
+    inset: 34%;
+  }
+
+  .board-cell__bead {
+    inset: 21%;
+  }
+
+  .tray-panel {
+    padding: 10px;
+  }
+
+  .tray-topline {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .tray-slots {
+    grid-template-columns: repeat(8, minmax(0, 1fr));
+    overflow-x: visible;
+  }
+
+  .tray-slot {
+    width: auto;
+    height: auto;
+    aspect-ratio: 1;
   }
 
   .info-rail {
     grid-template-columns: 1fr;
+    gap: 10px;
+  }
+
+  .support-modal,
+  .result-modal {
+    max-height: min(88vh, 760px);
+    overflow-y: auto;
+  }
+
+  .guide-bubble {
+    width: min(320px, calc(100vw - 24px));
+  }
+}
+
+@media (max-width: 720px) {
+  .page-shell {
+    width: min(100%, calc(100% - 14px));
+    padding-top: 12px;
   }
 
   .hero h1 {
-    font-size: 36px;
+    font-size: 34px;
+  }
+
+  .hero-copy__eyebrow {
+    font-size: 10px;
+  }
+
+  .hero p {
+    font-size: 11px;
   }
 
   .hero-hud,
   .level-strip {
     grid-template-columns: 1fr;
+  }
+
+  .timer-pill,
+  .progress-card {
+    border-radius: 16px;
+    padding: 7px 10px;
+  }
+
+  .timer-pill strong,
+  .progress-card strong {
+    font-size: 17px;
+  }
+
+  .level-chip {
+    padding: 9px 11px;
   }
 
   .playfield-card__top,
@@ -1265,14 +1469,48 @@ button:disabled {
 
   .action-row {
     width: 100%;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .soft-button {
     flex: 1;
+    text-align: center;
+  }
+
+  .side-card__header strong,
+  .playfield-card__top strong {
+    font-size: 16px;
+  }
+
+  .side-card__story,
+  .objective-item p,
+  .rules-snippet ol,
+  .info-card p {
+    font-size: 11px;
+  }
+
+  .board-grid {
+    max-width: 100%;
+  }
+
+  .tray-panel {
+    margin-top: 6px;
+    padding: 8px;
+  }
+
+  .tray-capacity {
+    justify-content: space-between;
+  }
+
+  .tray-slots {
+    gap: 3px;
+    padding: 4px;
   }
 
   .support-modal {
-    padding-inline: 18px;
+    width: min(100vw - 20px, 420px);
+    padding: 18px 16px 20px;
   }
 
   .support-modal__qr-frame {
@@ -1287,7 +1525,8 @@ button:disabled {
   }
 
   .result-modal {
-    padding-inline: 18px;
+    width: min(100vw - 20px, 420px);
+    padding: 18px 16px 20px;
   }
 
   .result-modal__badge {
@@ -1302,5 +1541,100 @@ button:disabled {
     width: min(320px, calc(100vw - 24px));
     left: 12px !important;
     right: 12px;
+    padding: 16px 16px 14px;
+  }
+
+  .guide-bubble__content {
+    grid-template-columns: 36px minmax(0, 1fr);
+    gap: 10px;
+  }
+
+  .guide-bubble__hand {
+    width: 36px;
+    height: 36px;
+    font-size: 20px;
+  }
+
+  .guide-bubble__content strong {
+    font-size: 17px;
+  }
+
+  .guide-bubble__content p {
+    font-size: 13px;
+    line-height: 1.5;
+  }
+}
+
+@media (max-width: 520px) {
+  .page-shell {
+    width: min(100%, calc(100% - 12px));
+    padding-top: 10px;
+  }
+
+  .main-shell {
+    gap: 8px;
+  }
+
+  .hero h1 {
+    font-size: 30px;
+  }
+
+  .hero p {
+    line-height: 1.45;
+  }
+
+  .level-chip strong {
+    font-size: 14px;
+  }
+
+  .playfield-card,
+  .side-card,
+  .tray-panel,
+  .info-card {
+    border-radius: 16px;
+  }
+
+  .playfield-card,
+  .side-card,
+  .info-card {
+    padding: 10px;
+  }
+
+  .board-shell {
+    padding: 6px;
+  }
+
+  .board-grid {
+    --board-gap: 1px;
+  }
+
+  .board-cell {
+    border-radius: 4px;
+  }
+
+  .board-cell__bead {
+    inset: 22%;
+  }
+
+  .tray-slots {
+    gap: 2px;
+    padding: 3px;
+  }
+
+  .collect-button,
+  .soft-button {
+    min-height: 36px;
+    padding: 6px 8px;
+    font-size: 11px;
+  }
+
+  .result-modal__title {
+    font-size: 22px;
+  }
+
+  .result-modal__time,
+  .result-modal__tagline,
+  .result-modal__share-status {
+    font-size: 13px;
   }
 }
