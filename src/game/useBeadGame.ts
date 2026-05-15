@@ -2,7 +2,7 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { colorMetaMap, createLevelBoard, levels } from './levels'
 import type { BoardMatrix, ClearSummary, ColorId, PlacementCell, PlacementRecord, ToolState } from './types'
 
-const SECRET_WIN_CODE = 'ssxxbaba'
+const SECRET_WIN_CODE = 'perlerwin'
 const ANIMATION_PREPARE_MS = 8
 const ANIMATION_STEP_MS = 24
 const ANIMATION_BUSY_MESSAGE = '拼豆正在移动，等它们落位后再继续操作。'

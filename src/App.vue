@@ -4,23 +4,17 @@ import supportQrCode from './assets/support-qr-code.png'
 import BeadBoard from './components/BeadBoard.vue'
 import TrayDock from './components/TrayDock.vue'
 import { useBeadGame } from './game/useBeadGame'
-import type { ColorId } from './game/types'
+import type { BoardMatrix, ColorId } from './game/types'
 
-const TUTORIAL_STORAGE_KEY = 'pingdou-game-guided-tutorial-v2'
+const TUTORIAL_STORAGE_KEY = 'pingdou-game-guided-tutorial-v3'
 
-type TutorialStepId = 'activate' | 'collect' | 'tray' | 'place'
+type TutorialStepId = 'activate-direct' | 'place-direct' | 'activate-collect' | 'collect' | 'tray' | 'place-tray'
 
-interface TutorialPlan {
-  color: ColorId
-  source: {
-    row: number
-    col: number
-  }
-  trayIndex: number
-  target: {
-    row: number
-    col: number
-  }
+interface TutorialStep {
+  id: TutorialStepId
+  badge: string
+  title: string
+  body: string
 }
 
 interface FocusRect {
@@ -31,36 +25,74 @@ interface FocusRect {
   radius: number
 }
 
-const tutorialSteps: Array<{
-  id: TutorialStepId
-  badge: string
-  title: string
-  body: string
-}> = [
+const tutorialSteps: TutorialStep[] = [
   {
-    id: 'activate',
+    id: 'activate-direct',
     badge: '步骤 1',
-    title: '先点亮一颗豆子',
-    body: '点一下高亮出来的这颗豆子，先感受“同色整组激活”的第一步。'
+    title: '先激活棋盘上的豆子',
+    body: '点一下高亮出来的这颗豆子，先把同色豆子激活起来。'
+  },
+  {
+    id: 'place-direct',
+    badge: '步骤 2',
+    title: '直接补到同色空格',
+    body: '已激活的豆子，不一定要先进收纳槽，点这个同色空格就能直接自动补位。'
+  },
+  {
+    id: 'activate-collect',
+    badge: '步骤 3',
+    title: '再试一次激活',
+    body: '这次换另一种颜色，点一下这颗豆子，准备演示收纳玩法。'
   },
   {
     id: 'collect',
-    badge: '步骤 2',
+    badge: '步骤 4',
     title: '把激活豆子收进收纳槽',
-    body: '现在点击底部这个按钮，激活的豆子会一颗一颗落进收纳槽。'
+    body: '点击底部这个按钮，激活的豆子会一颗一颗落进收纳槽。'
   },
   {
     id: 'tray',
-    badge: '步骤 3',
-    title: '从收纳槽里拿一种颜色',
+    badge: '步骤 5',
+    title: '从收纳槽里选颜色',
     body: '点一下高亮的槽位，选中刚刚收进去的颜色。'
   },
   {
-    id: 'place',
-    badge: '步骤 4',
-    title: '把豆子放回棋盘',
-    body: '最后点一下这个空出来的格子，看看它怎样自动补回去。'
+    id: 'place-tray',
+    badge: '步骤 6',
+    title: '把收纳槽里的豆子放回棋盘',
+    body: '最后点这个空格，把收纳槽里的豆子再补回去，整个流程就完成啦。'
   }
+]
+
+const tutorialPlan = {
+  directColor: 'lime' as ColorId,
+  directSource: { row: 0, col: 1 },
+  directTarget: { row: 0, col: 2 },
+  collectColor: 'mint' as ColorId,
+  collectSource: { row: 1, col: 2 },
+  trayIndex: 0,
+  trayTarget: { row: 1, col: 2 }
+}
+
+const createTutorialBoard = (): BoardMatrix => [
+  [
+    null,
+    { baseColor: 'plum', beadColor: 'lime' },
+    { baseColor: 'lime', beadColor: null },
+    null
+  ],
+  [
+    { baseColor: 'pearl', beadColor: 'pearl' },
+    { baseColor: 'bubblegum', beadColor: 'bubblegum' },
+    { baseColor: 'mint', beadColor: 'mint' },
+    { baseColor: 'pearl', beadColor: 'pearl' }
+  ],
+  [
+    null,
+    { baseColor: 'bubblegum', beadColor: 'bubblegum' },
+    { baseColor: 'pearl', beadColor: 'pearl' },
+    null
+  ]
 ]
 
 const game = useBeadGame()
@@ -88,7 +120,6 @@ const isResultModalOpen = ref(false)
 const shareCopyStatus = ref('')
 const isTutorialOpen = ref(false)
 const tutorialStepIndex = ref(0)
-const tutorialPlan = ref<TutorialPlan | null>(null)
 const tutorialFocusRect = ref<FocusRect | null>(null)
 
 let autoAdvanceTimer: number | null = null
@@ -145,28 +176,25 @@ const restartFromResult = () => {
 const finishTutorial = () => {
   isTutorialOpen.value = false
   tutorialStepIndex.value = 0
-  tutorialPlan.value = null
   tutorialFocusRect.value = null
   window.localStorage.setItem(TUTORIAL_STORAGE_KEY, '1')
+  game.restartRun()
 }
 
-const getTutorialTargetId = (): string | null => {
-  const plan = tutorialPlan.value
-  if (!plan) {
-    return null
-  }
-
+const getTutorialTargetId = (): string => {
   switch (currentTutorialStep.value.id) {
-    case 'activate':
-      return `board-cell-${plan.source.row}-${plan.source.col}`
+    case 'activate-direct':
+      return `board-cell-${tutorialPlan.directSource.row}-${tutorialPlan.directSource.col}`
+    case 'place-direct':
+      return `board-cell-${tutorialPlan.directTarget.row}-${tutorialPlan.directTarget.col}`
+    case 'activate-collect':
+      return `board-cell-${tutorialPlan.collectSource.row}-${tutorialPlan.collectSource.col}`
     case 'collect':
       return 'collect-button'
     case 'tray':
-      return `tray-slot-${plan.trayIndex}`
-    case 'place':
-      return `board-cell-${plan.target.row}-${plan.target.col}`
-    default:
-      return null
+      return `tray-slot-${tutorialPlan.trayIndex}`
+    case 'place-tray':
+      return `board-cell-${tutorialPlan.trayTarget.row}-${tutorialPlan.trayTarget.col}`
   }
 }
 
@@ -177,12 +205,8 @@ const updateTutorialLayout = async () => {
   }
 
   await nextTick()
-  const targetId = getTutorialTargetId()
-  if (!targetId) {
-    tutorialFocusRect.value = null
-    return
-  }
 
+  const targetId = getTutorialTargetId()
   const element = document.querySelector<HTMLElement>(`[data-tutorial-id="${targetId}"]`)
   if (!element) {
     tutorialFocusRect.value = null
@@ -190,15 +214,15 @@ const updateTutorialLayout = async () => {
   }
 
   const rect = element.getBoundingClientRect()
-  const radius = targetId.startsWith('board-cell') || targetId.startsWith('tray-slot') ? 18 : 22
-  const padding = targetId.startsWith('board-cell') || targetId.startsWith('tray-slot') ? 8 : 10
+  const isCell = targetId.startsWith('board-cell') || targetId.startsWith('tray-slot')
+  const padding = isCell ? 8 : 10
 
   tutorialFocusRect.value = {
     top: rect.top - padding,
     left: rect.left - padding,
     width: rect.width + padding * 2,
     height: rect.height + padding * 2,
-    radius
+    radius: isCell ? 18 : 22
   }
 }
 
@@ -214,48 +238,16 @@ const scheduleTutorialLayout = () => {
   })
 }
 
-const buildTutorialPlan = (): TutorialPlan | null => {
-  for (let rowIndex = 0; rowIndex < board.value.length; rowIndex += 1) {
-    const row = board.value[rowIndex]
-
-    for (let colIndex = 0; colIndex < row.length; colIndex += 1) {
-      const cell = row[colIndex]
-      if (!cell?.beadColor) {
-        continue
-      }
-
-      if (cell.beadColor !== cell.baseColor) {
-        continue
-      }
-
-      return {
-        color: cell.beadColor,
-        source: {
-          row: rowIndex,
-          col: colIndex
-        },
-        trayIndex: 0,
-        target: {
-          row: rowIndex,
-          col: colIndex
-        }
-      }
-    }
-  }
-
-  return null
-}
-
 const startGuidedTutorial = async () => {
   game.restartRun()
   await nextTick()
 
-  tutorialPlan.value = buildTutorialPlan()
-  if (!tutorialPlan.value) {
-    window.localStorage.setItem(TUTORIAL_STORAGE_KEY, '1')
-    return
-  }
-
+  board.value = createTutorialBoard()
+  game.tray.value = Array.from({ length: currentLevel.value.capacity }, () => null)
+  activeBoardColor.value = null
+  selectedTrayColor.value = null
+  status.value = 'playing'
+  game.message.value = '跟着引导完成一遍演示，就能马上上手。'
   tutorialStepIndex.value = 0
   isTutorialOpen.value = true
   scheduleTutorialLayout()
@@ -267,13 +259,8 @@ const handleBoardCellClick = async (row: number, col: number) => {
     return
   }
 
-  const plan = tutorialPlan.value
-  if (!plan) {
-    return
-  }
-
-  if (currentTutorialStep.value.id === 'activate') {
-    if (row !== plan.source.row || col !== plan.source.col) {
+  if (currentTutorialStep.value.id === 'activate-direct') {
+    if (row !== tutorialPlan.directSource.row || col !== tutorialPlan.directSource.col) {
       return
     }
 
@@ -283,15 +270,37 @@ const handleBoardCellClick = async (row: number, col: number) => {
     return
   }
 
-  if (currentTutorialStep.value.id === 'place') {
-    if (row !== plan.target.row || col !== plan.target.col) {
+  if (currentTutorialStep.value.id === 'place-direct') {
+    if (row !== tutorialPlan.directTarget.row || col !== tutorialPlan.directTarget.col) {
+      return
+    }
+
+    await game.placeBead(row, col)
+    tutorialStepIndex.value = 2
+    scheduleTutorialLayout()
+    return
+  }
+
+  if (currentTutorialStep.value.id === 'activate-collect') {
+    if (row !== tutorialPlan.collectSource.row || col !== tutorialPlan.collectSource.col) {
+      return
+    }
+
+    await game.placeBead(row, col)
+    tutorialStepIndex.value = 3
+    scheduleTutorialLayout()
+    return
+  }
+
+  if (currentTutorialStep.value.id === 'place-tray') {
+    if (row !== tutorialPlan.trayTarget.row || col !== tutorialPlan.trayTarget.col) {
       return
     }
 
     await game.placeBead(row, col)
     window.setTimeout(() => {
       finishTutorial()
-    }, 320)
+    }, 240)
   }
 }
 
@@ -301,18 +310,12 @@ const handleCollect = async () => {
     return
   }
 
-  if (currentTutorialStep.value.id !== 'collect' || !tutorialPlan.value) {
+  if (currentTutorialStep.value.id !== 'collect') {
     return
   }
 
   await game.collectActiveColor()
-
-  const trayIndex = traySlots.value.find((slot) => slot.color === tutorialPlan.value?.color)?.index ?? 0
-  tutorialPlan.value = {
-    ...tutorialPlan.value,
-    trayIndex
-  }
-  tutorialStepIndex.value = 2
+  tutorialStepIndex.value = 4
   scheduleTutorialLayout()
 }
 
@@ -322,12 +325,12 @@ const handleTraySelect = (slotIndex: number) => {
     return
   }
 
-  if (currentTutorialStep.value.id !== 'tray' || !tutorialPlan.value || slotIndex !== tutorialPlan.value.trayIndex) {
+  if (currentTutorialStep.value.id !== 'tray' || slotIndex !== tutorialPlan.trayIndex) {
     return
   }
 
   game.selectTrayColor(slotIndex)
-  tutorialStepIndex.value = 3
+  tutorialStepIndex.value = 5
   scheduleTutorialLayout()
 }
 
@@ -361,12 +364,9 @@ const tutorialBubbleStyle = computed(() => {
   }
 
   const width = 320
-  const preferRight = rect.left + rect.width + width + 48 < window.innerWidth
-  const left = preferRight ? rect.left + rect.width + 22 : Math.max(24, rect.left - width - 22)
-  const top = Math.min(
-    Math.max(24, rect.top + rect.height / 2 - 96),
-    window.innerHeight - 250
-  )
+  const preferRight = rect.left + rect.width + width + 40 < window.innerWidth
+  const left = preferRight ? rect.left + rect.width + 18 : Math.max(16, rect.left - width - 18)
+  const top = Math.min(Math.max(20, rect.top + rect.height / 2 - 96), window.innerHeight - 240)
 
   return {
     top: `${top}px`,
@@ -488,7 +488,7 @@ const renderShareCanvas = () => {
 
   context.fillStyle = '#7f6fb6'
   context.font = '700 88px Microsoft YaHei'
-  context.fillText('拼豆冒险屋', 106, 238)
+  context.fillText('拼豆大闯关', 106, 238)
 
   context.fillStyle = '#8d82b4'
   context.font = '30px Microsoft YaHei'
@@ -540,7 +540,7 @@ const renderShareCanvas = () => {
 
   context.fillStyle = '#8d82b4'
   context.font = '26px Microsoft YaHei'
-  context.fillText('秘籍 ssxxbaba 可直接通关当前关卡', 138, 1128)
+  context.fillText('秘籍 perlerwin 可直接通关当前关卡', 138, 1128)
 
   context.fillStyle = '#c5b39f'
   context.font = '24px Microsoft YaHei'
@@ -578,7 +578,7 @@ const copyResultShare = async () => {
 
   try {
     await navigator.clipboard.writeText(
-      `我在拼豆冒险屋全部通关，总用时 ${formatElapsed(clearSummary.value.elapsedSeconds)}，获得称号：${clearSummary.value.title}。`
+      `我在拼豆大闯关全部通关，总用时 ${formatElapsed(clearSummary.value.elapsedSeconds)}，获得称号：${clearSummary.value.title}。`
     )
     shareCopyStatus.value = '已复制分享文案'
   } catch {
@@ -598,11 +598,11 @@ watch(
 )
 
 watch(
-  [status, clearSummary, levelIndex],
-  ([nextStatus, summary, currentIndex]) => {
+  [status, clearSummary, levelIndex, isTutorialOpen],
+  ([nextStatus, summary, currentIndex, tutorialOpen]) => {
     clearAutoAdvanceTimer()
 
-    if (nextStatus !== 'won' || summary || currentIndex >= game.levels.length - 1 || isTutorialOpen.value) {
+    if (tutorialOpen || nextStatus !== 'won' || summary || currentIndex >= game.levels.length - 1) {
       return
     }
 
@@ -648,7 +648,7 @@ onBeforeUnmount(() => {
       <header class="hero">
         <div class="hero-copy">
           <span class="hero-copy__eyebrow">Perler Puzzle Draft</span>
-          <h1>拼豆冒险屋</h1>
+          <h1>拼豆大闯关</h1>
           <p>棋盘内随机散落拼豆，点击场内豆子即可整色激活；同色空底格可直接自动补位，收纳后也能批量回填。</p>
         </div>
 
@@ -718,9 +718,7 @@ onBeforeUnmount(() => {
               </div>
 
               <div class="action-row">
-                <button class="soft-button" type="button" :disabled="isAnimating || isTutorialOpen" @click="game.resetLevel">
-                  重置本关
-                </button>
+                <button class="soft-button" type="button" :disabled="isAnimating || isTutorialOpen" @click="game.resetLevel">重置本关</button>
                 <button class="soft-button soft-button--primary" type="button" :disabled="isAnimating || isTutorialOpen" @click="game.goToNextLevel">
                   下一关
                 </button>
@@ -766,9 +764,7 @@ onBeforeUnmount(() => {
               <span class="info-card__icon info-card__icon--soft">♥</span>
               <strong>社区与支持</strong>
             </div>
-            <button class="info-card__cta" type="button" :disabled="isAnimating || isTutorialOpen" @click="openSupportModal">
-              请作者喝一杯奶茶
-            </button>
+            <button class="info-card__cta" type="button" :disabled="isAnimating || isTutorialOpen" @click="openSupportModal">请作者喝一杯奶茶</button>
             <p>这里先作为展示位，后面可以替换成公告、活动入口或者帮助说明。</p>
           </section>
         </aside>
