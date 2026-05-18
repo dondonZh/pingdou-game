@@ -1,0 +1,23 @@
+services:
+  web:
+    image: pingdou-web:latest
+    ports:
+      - "8080:80"
+    depends_on:
+      - api
+
+  api:
+    image: pingdou-api:latest
+    environment:
+      PORT: 3001
+      REDIS_URL: redis://redis:6379
+    depends_on:
+      - redis
+
+  redis:
+    image: redis:7-alpine
+    volumes:
+      - redis-data:/data
+
+volumes:
+  redis-data:

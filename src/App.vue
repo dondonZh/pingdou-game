@@ -4,7 +4,15 @@ import supportQrCode from './assets/support-qr-code.png'
 import BeadBoard from './components/BeadBoard.vue'
 import TrayDock from './components/TrayDock.vue'
 import { useBeadGame } from './game/useBeadGame'
-import type { BoardMatrix, ColorId } from './game/types'
+import type { BoardMatrix, ClearSummary, ColorId } from './game/types'
+import { fetchGlobalLeaderboard, registerGuestProfile, submitGlobalScore, type LeaderboardMe, type LeaderboardEntry } from './leaderboard'
+import {
+  NICKNAME_GENERATION_LIMIT,
+  generateRandomNickname,
+  loadPlayerProfile,
+  savePlayerProfile,
+  type PlayerProfile
+} from './playerProfile'
 
 const TUTORIAL_STORAGE_KEY = 'pingdou-game-guided-tutorial-v3'
 
@@ -114,13 +122,25 @@ const enteringBoardKeys = game.enteringBoardKeys
 const leavingBoardKeys = game.leavingBoardKeys
 const enteringTrayIndexes = game.enteringTrayIndexes
 const leavingTrayIndexes = game.leavingTrayIndexes
+const playerProfile = ref<PlayerProfile | null>(loadPlayerProfile())
 
 const isSupportModalOpen = ref(false)
 const isResultModalOpen = ref(false)
+const isProfileModalOpen = ref(false)
+const isLeaderboardModalOpen = ref(false)
 const shareCopyStatus = ref('')
 const isTutorialOpen = ref(false)
 const tutorialStepIndex = ref(0)
 const tutorialFocusRect = ref<FocusRect | null>(null)
+const nicknameDraft = ref('')
+const nicknameAttemptsUsed = ref(0)
+const nicknameHistory = ref<string[]>([])
+const leaderboardEntries = ref<LeaderboardEntry[]>([])
+const leaderboardMe = ref<LeaderboardMe | null>(null)
+const leaderboardStatusText = ref('')
+const leaderboardLoadError = ref('')
+const isLeaderboardLoading = ref(false)
+const isSubmittingLeaderboard = ref(false)
 
 let autoAdvanceTimer: number | null = null
 let tutorialLayoutFrame: number | null = null
@@ -132,6 +152,25 @@ const targetStats = computed(() => game.colorStats.value.filter((entry) => entry
 const boardAccent = computed(() => {
   const active = game.activeVisualColor.value
   return active ? game.colorMetaMap[active].accent : null
+})
+const playerDisplayName = computed(() => playerProfile.value?.nickname ?? '未命名玩家')
+const nicknameAttemptsLeft = computed(() => Math.max(NICKNAME_GENERATION_LIMIT - nicknameAttemptsUsed.value, 0))
+const canRerollNickname = computed(() => nicknameAttemptsUsed.value < NICKNAME_GENERATION_LIMIT)
+const canJoinLeaderboard = computed(() => !!playerProfile.value)
+const leaderboardSummaryText = computed(() => {
+  if (leaderboardMe.value) {
+    return `当前第 ${leaderboardMe.value.rank} 名`
+  }
+
+  if (isSubmittingLeaderboard.value) {
+    return '成绩提交中'
+  }
+
+  if (!canJoinLeaderboard.value) {
+    return '确认昵称后解锁'
+  }
+
+  return '暂未上榜'
 })
 
 const isCompleted = (levelId: number) => game.completedLevelIds.value.includes(levelId)
@@ -197,12 +236,133 @@ const downloadBlob = (blob: Blob, filename: string) => {
   window.setTimeout(() => URL.revokeObjectURL(url), 1200)
 }
 
+const syncPlayerProfile = async (profile: PlayerProfile | null) => {
+  if (!profile) {
+    return
+  }
+
+  try {
+    await registerGuestProfile(profile)
+  } catch (error) {
+    console.error('Failed to sync player profile', error)
+  }
+}
+
+const refreshLeaderboard = async (options?: { silent?: boolean }) => {
+  const silent = options?.silent ?? false
+  if (!silent) {
+    isLeaderboardLoading.value = true
+    leaderboardLoadError.value = ''
+  }
+
+  try {
+    const response = await fetchGlobalLeaderboard(playerProfile.value?.playerId, 20)
+    leaderboardEntries.value = response.items
+    leaderboardMe.value = response.me
+  } catch (error) {
+    console.error('Failed to load leaderboard', error)
+    if (!silent) {
+      leaderboardLoadError.value = '排行榜加载失败，请稍后再试。'
+    }
+  } finally {
+    if (!silent) {
+      isLeaderboardLoading.value = false
+    }
+  }
+}
+
+const openLeaderboardModal = async () => {
+  isLeaderboardModalOpen.value = true
+  await refreshLeaderboard()
+}
+
+const closeLeaderboardModal = () => {
+  isLeaderboardModalOpen.value = false
+}
+
+const submitLeaderboardResult = async (summary: ClearSummary) => {
+  if (!playerProfile.value) {
+    leaderboardStatusText.value = '确认昵称后即可参与排行榜。'
+    return
+  }
+
+  isSubmittingLeaderboard.value = true
+  leaderboardStatusText.value = summary.cheatUsed ? '正在提交秘籍通关成绩...' : '正在提交总榜成绩...'
+
+  try {
+    const result = await submitGlobalScore({
+      playerId: playerProfile.value.playerId,
+      nickname: playerProfile.value.nickname,
+      elapsedMs: summary.elapsedSeconds * 1000,
+      cheatUsed: summary.cheatUsed
+    })
+
+    if (!result.accepted) {
+      leaderboardStatusText.value =
+        result.reason === 'cheat_blocked' ? '本次成绩未计入总榜。' : '成绩提交失败，请稍后重试。'
+      return
+    }
+
+    await refreshLeaderboard({
+      silent: !isLeaderboardModalOpen.value
+    })
+
+    const latestRank = leaderboardMe.value?.rank ?? result.rank
+    leaderboardStatusText.value = result.improved
+      ? `${summary.cheatUsed ? '秘籍通关成绩已上榜' : '成绩已上榜'}${latestRank ? `，当前第 ${latestRank} 名` : ''}。`
+      : `${summary.cheatUsed ? '秘籍通关成绩未刷新最佳记录' : '本次未刷新最佳成绩'}${latestRank ? `，当前第 ${latestRank} 名` : ''}。`
+  } catch (error) {
+    console.error('Failed to submit leaderboard result', error)
+    leaderboardStatusText.value = '成绩提交失败，请确认排行榜服务已启动。'
+  } finally {
+    isSubmittingLeaderboard.value = false
+  }
+}
+
+const openNicknameModal = () => {
+  const firstNickname = generateRandomNickname()
+
+  nicknameDraft.value = firstNickname
+  nicknameAttemptsUsed.value = 1
+  nicknameHistory.value = [firstNickname]
+  isProfileModalOpen.value = true
+}
+
+const rerollNickname = () => {
+  if (!canRerollNickname.value) {
+    return
+  }
+
+  const nextNickname = generateRandomNickname(nicknameHistory.value)
+  nicknameDraft.value = nextNickname
+  nicknameHistory.value = [...nicknameHistory.value, nextNickname]
+  nicknameAttemptsUsed.value += 1
+}
+
+const confirmNickname = () => {
+  if (!nicknameDraft.value) {
+    openNicknameModal()
+    return
+  }
+
+  playerProfile.value = savePlayerProfile(nicknameDraft.value, playerProfile.value)
+  isProfileModalOpen.value = false
+  void syncPlayerProfile(playerProfile.value)
+  void refreshLeaderboard({
+    silent: true
+  })
+}
+
 const finishTutorial = () => {
   isTutorialOpen.value = false
   tutorialStepIndex.value = 0
   tutorialFocusRect.value = null
   window.localStorage.setItem(TUTORIAL_STORAGE_KEY, '1')
   game.restartRun()
+
+  if (!playerProfile.value) {
+    openNicknameModal()
+  }
 }
 
 const getTutorialTargetId = (): string => {
@@ -433,6 +593,15 @@ const tutorialBubbleStyle = computed(() => {
 
 const handleWindowKeydown = (event: KeyboardEvent) => {
   if (event.key !== 'Escape') {
+    return
+  }
+
+  if (isProfileModalOpen.value) {
+    return
+  }
+
+  if (isLeaderboardModalOpen.value) {
+    closeLeaderboardModal()
     return
   }
 
@@ -678,6 +847,13 @@ watch(
     if (summary && summary !== previous) {
       isResultModalOpen.value = true
       shareCopyStatus.value = ''
+      leaderboardStatusText.value = ''
+
+      if (canJoinLeaderboard.value) {
+        void submitLeaderboardResult(summary)
+      } else {
+        leaderboardStatusText.value = '确认昵称后即可参与排行榜。'
+      }
     }
   },
   { flush: 'post' }
@@ -715,7 +891,18 @@ onMounted(() => {
 
   if (!window.localStorage.getItem(TUTORIAL_STORAGE_KEY)) {
     void startGuidedTutorial()
+    return
   }
+
+  if (!playerProfile.value) {
+    openNicknameModal()
+    return
+  }
+
+  void syncPlayerProfile(playerProfile.value)
+  void refreshLeaderboard({
+    silent: true
+  })
 })
 
 onBeforeUnmount(() => {
@@ -750,6 +937,11 @@ onBeforeUnmount(() => {
           <div class="progress-card">
             <span>归位进度</span>
             <strong>{{ progress }}%</strong>
+          </div>
+
+          <div class="profile-pill">
+            <span>当前玩家</span>
+            <strong>{{ playerDisplayName }}</strong>
           </div>
         </div>
       </header>
@@ -845,6 +1037,23 @@ onBeforeUnmount(() => {
         </main>
 
         <aside class="info-rail">
+          <section class="info-card info-card--leaderboard">
+            <div class="info-card__title">
+              <span class="info-card__icon info-card__icon--rank">#</span>
+              <strong>总榜入口</strong>
+            </div>
+            <p>当前榜单记录全部关卡通关总用时，时间越短排名越高。</p>
+            <p>我的状态：{{ leaderboardSummaryText }}</p>
+            <button
+              class="info-card__cta info-card__cta--violet"
+              type="button"
+              :disabled="isTutorialOpen || isProfileModalOpen || isLeaderboardLoading"
+              @click="openLeaderboardModal"
+            >
+              {{ isLeaderboardLoading ? '榜单加载中...' : '查看总榜' }}
+            </button>
+          </section>
+
           <section class="info-card">
             <div class="info-card__title">
               <span class="info-card__icon info-card__icon--warm">★</span>
@@ -918,11 +1127,75 @@ onBeforeUnmount(() => {
         <span v-if="clearSummary.cheatUsed" class="result-modal__cheat-chip">官方外挂已启用</span>
 
         <div class="result-modal__actions">
-          <button class="soft-button" type="button" @click="copyResultShare">复制分享图</button>
+          <button class="soft-button" type="button" :disabled="isSubmittingLeaderboard" @click="copyResultShare">复制分享图</button>
+          <button class="soft-button" type="button" :disabled="isSubmittingLeaderboard" @click="openLeaderboardModal">查看总榜</button>
           <button class="soft-button" type="button" @click="closeResultModal">稍后再看</button>
           <button class="soft-button soft-button--primary" type="button" @click="restartFromResult">再来一遍</button>
         </div>
+        <p v-if="leaderboardStatusText" class="result-modal__share-status">{{ leaderboardStatusText }}</p>
         <p v-if="shareCopyStatus" class="result-modal__share-status">{{ shareCopyStatus }}</p>
+      </div>
+    </div>
+
+    <div v-if="isLeaderboardModalOpen" class="leaderboard-modal-backdrop" @click="closeLeaderboardModal">
+      <div class="leaderboard-modal" @click.stop>
+        <div class="leaderboard-modal__head">
+          <span class="leaderboard-modal__eyebrow">Global Board</span>
+          <button class="leaderboard-modal__close" type="button" aria-label="关闭排行榜弹窗" @click="closeLeaderboardModal">×</button>
+        </div>
+
+        <strong class="leaderboard-modal__title">全部通关总榜</strong>
+        <p class="leaderboard-modal__desc">当前记录的是全部关卡通关总用时，时间越短排名越高。</p>
+
+        <div v-if="leaderboardMe" class="leaderboard-modal__me">
+          <span>我的最好成绩</span>
+          <strong>第 {{ leaderboardMe.rank }} 名 · {{ formatElapsed(Math.round(leaderboardMe.elapsedMs / 1000)) }}</strong>
+        </div>
+
+        <p v-if="leaderboardLoadError" class="leaderboard-modal__status">{{ leaderboardLoadError }}</p>
+        <p v-else-if="isLeaderboardLoading" class="leaderboard-modal__status">排行榜加载中...</p>
+
+        <div v-else class="leaderboard-list">
+          <div v-if="leaderboardEntries.length === 0" class="leaderboard-list__empty">排行榜还没有成绩，快来拿下第一名。</div>
+          <div v-for="entry in leaderboardEntries" :key="entry.playerId" class="leaderboard-row">
+            <span class="leaderboard-row__rank">#{{ entry.rank }}</span>
+            <div class="leaderboard-row__meta">
+              <strong>{{ entry.nickname }}</strong>
+              <p>{{ formatElapsed(Math.round(entry.elapsedMs / 1000)) }}</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="leaderboard-modal__actions">
+          <button class="soft-button" type="button" :disabled="isLeaderboardLoading" @click="refreshLeaderboard()">刷新榜单</button>
+          <button class="soft-button soft-button--primary" type="button" @click="closeLeaderboardModal">我知道了</button>
+        </div>
+      </div>
+    </div>
+
+    <div v-if="isProfileModalOpen" class="profile-modal-backdrop">
+      <div class="profile-modal" @click.stop>
+        <span class="profile-modal__eyebrow">游客登录</span>
+        <strong class="profile-modal__title">系统为你准备了一个中文昵称</strong>
+        <p class="profile-modal__desc">
+          新手教程结束后需要确认昵称才会进入游戏。昵称只能系统随机生成，确认后会保存在当前设备，后面默认直接登录。
+        </p>
+
+        <div class="profile-modal__name-box">
+          <span>随机昵称</span>
+          <strong>{{ nicknameDraft }}</strong>
+        </div>
+
+        <p class="profile-modal__hint">
+          已随机 {{ nicknameAttemptsUsed }} / {{ NICKNAME_GENERATION_LIMIT }} 次，还可随机 {{ nicknameAttemptsLeft }} 次。
+        </p>
+
+        <div class="profile-modal__actions">
+          <button class="soft-button" type="button" :disabled="!canRerollNickname" @click="rerollNickname">
+            {{ canRerollNickname ? '再随机一次' : '随机次数已用完' }}
+          </button>
+          <button class="soft-button soft-button--primary" type="button" @click="confirmNickname">确认进入</button>
+        </div>
       </div>
     </div>
 
